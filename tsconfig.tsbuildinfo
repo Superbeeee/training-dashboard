@@ -1,0 +1,1 @@
+{"root":["./src/main.ts","./src/shims-vue.d.ts","./src/data/fixtures.ts","./src/lib/track.ts","./src/lib/training.ts","./src/stores/track.ts","./src/app.vue","./src/components/linechart.vue","./src/components/menudropdown.vue","./src/components/ring.vue","./src/views/overviewview.vue","./src/views/route3dview.vue","./src/views/scaleview.vue"],"version":"6.0.3"}

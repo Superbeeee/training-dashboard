@@ -1,0 +1,82 @@
+@import 'tailwindcss';
+
+/* 運動數據感的色票：深色為主、單一強調色（青綠） */
+@theme {
+  --color-ink: #0d1117;
+  --color-panel: #161b22;
+  --color-panel-2: #1c2430;
+  --color-line: #263140;
+  --color-fg: #e6edf3;
+  --color-dim: #8b98a8;
+  --color-accent: #23d3a0;
+  --color-warn: #ffb454;
+  --color-danger: #ff6b6b;
+  --color-hr: #ff6b8b;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'PingFang TC',
+    'Noto Sans TC', sans-serif;
+}
+
+/* 數字用等寬字身，數值跳動時不會左右晃。
+   Tailwind 4 要用 @utility 宣告，才能同時被 class 與 @apply 使用。 */
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@layer base {
+  body {
+    @apply bg-ink text-fg font-sans antialiased;
+  }
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-panel border border-line rounded-xl p-4;
+  }
+  .card-h {
+    @apply text-xs text-dim font-semibold tracking-wider uppercase mb-3;
+  }
+  .stat {
+    @apply text-[34px] font-bold leading-none tnum;
+  }
+  .stat-u {
+    @apply text-sm text-dim font-medium ml-1;
+  }
+  .sub {
+    @apply text-dim text-xs mt-1.5;
+  }
+  .pill {
+    @apply px-3.5 py-1.5 rounded-full border border-line text-dim text-[13px]
+           cursor-pointer transition hover:text-fg hover:border-[#3a4757];
+  }
+  .pill-on {
+    @apply bg-accent border-accent text-[#05231a] font-semibold;
+  }
+  .btn {
+    @apply bg-accent text-[#05231a] font-bold px-5 py-2.5 rounded-lg
+           cursor-pointer text-sm disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply bg-transparent border border-line text-fg font-medium;
+  }
+  .note {
+    @apply bg-panel-2 border-l-[3px] border-accent px-3.5 py-3 rounded-r-lg
+           text-[13px] leading-7 text-[#c3cedb];
+  }
+  .note-warn {
+    @apply border-l-warn;
+  }
+  .note code {
+    @apply bg-[#0b1017] px-1.5 py-px rounded text-xs text-accent;
+  }
+  /* 翻週的左右箭頭 */
+  .wk-nav {
+    @apply w-6 h-6 rounded border border-line text-dim leading-none
+           hover:text-fg hover:border-[#38465a] cursor-pointer
+           disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-dim
+           disabled:hover:border-line;
+  }
+}
