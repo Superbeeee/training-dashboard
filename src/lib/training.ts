@@ -15,7 +15,25 @@ export interface Rep {
   pace: string;          // '4:04/km'
   max_hr: number | null;
   rest: string;
-  hit: boolean | null;   // 有目標配速才判定
+  hit: boolean | null;      // 落在課表那一區的帶內；沒課表就是 null
+  hit_own: boolean | null;  // 落在當天實際採用的目標帶內；活動名稱沒寫就是 null
+}
+
+/** 當天教練開的課表。由 plans.py 從 coach/logs/plans.md 解析。 */
+export interface Plan {
+  content: string;              // '間歇' / '節奏跑'
+  zone: number | null;
+  zone_code: string | null;     // 'A' / 'T' / 'M'
+  band: [number, number] | null;  // [下限, 上限]，每 400m 秒數
+  distance: string | null;
+  reps: string;                 // '3~4'
+  reps_lo: number | null;
+  reps_hi: number | null;
+  /** 當天實際採用的目標（讀自 Garmin 活動名稱）。累的時候會自己降一階，
+   *  而那個決定除了活動名稱以外沒有別的地方留著。 */
+  adopted_sec: number | null;
+  adopted_band: [number, number] | null;
+  downshift: boolean;           // true = 用了降階表的同一區
 }
 
 export type Kind = 'run' | 'bike' | 'swim' | 'lift';
@@ -39,6 +57,47 @@ export interface Session {
   summary: string;
   moves: number;         // 動作數，跑步為 0
   reps: Rep[];           // 間歇的分組明細；沒有「組」表就是空陣列
+  plan: Plan | null;     // 當天課表；教練沒開就是 null
+}
+
+/** 這一組是慢了、快了，還是落在帶內。
+ *  區間帶是雙向的 —— 跑太快也不算達標，那表示強度跑錯區。 */
+export function bandSide(sec: number, band: [number, number] | null): 'slow' | 'fast' | 'in' | null {
+  if (!band) return null;
+  if (sec > band[1]) return 'slow';
+  if (sec < band[0]) return 'fast';
+  return 'in';
+}
+
+/** 這場課表的達成情形。
+ *
+ *  配速有兩個分母，而且**兩個都要報**：對課表開的那一區，以及對當天實際
+ *  採用的目標。降階的日子這兩個數字會差很多 —— 那個差額不是誤差，是
+ *  「這天我決定降速」的紀錄，只用其中一個講都會把它抹掉。 */
+export function adherence(s: Session) {
+  if (!s.plan) return null;
+  const judged = s.reps.filter((r) => r.hit !== null);
+  const own = s.reps.filter((r) => r.hit_own !== null);
+  return {
+    paceHit: judged.filter((r) => r.hit).length,
+    paceTotal: judged.length,
+    ownHit: own.filter((r) => r.hit_own).length,
+    ownTotal: own.length,
+    reps: s.reps.length,
+    repsLo: s.plan.reps_lo,
+    repsMet: s.plan.reps_lo === null || s.reps.length >= s.plan.reps_lo,
+  };
+}
+
+/** 每日訓練負荷,由 personal-trainer/trimp.py 依 Garmin 心率算出。
+ *  只涵蓋有心率的活動 —— 重訓沒戴錶,不在這條曲線裡。 */
+export interface DayLoad {
+  date: string;          // YYYY-MM-DD
+  trimp: number;         // 當日 TRIMP 總和,休息日為 0
+  atl: number;           // 7 日 EMA,短期疲勞
+  ctl: number;           // 42 日 EMA,長期體能
+  tsb: number;           // ctl - atl,負值代表疲勞累積
+  sessions: number;      // 當日有心率的活動筆數
 }
 
 export interface Weighing {
@@ -55,6 +114,7 @@ async function getJSON<T>(url: string): Promise<T[]> {
 
 export const loadSessions = () => getJSON<Session>('/sessions.json');
 export const loadWeighings = () => getJSON<Weighing>('/weights.json');
+export const loadLoad = () => getJSON<DayLoad>('/load.json');
 
 /** 本地時間的 YYYY-MM-DD（不要用 toISOString，那是 UTC，跨日會差一天）。 */
 const ymd = (d: Date) =>

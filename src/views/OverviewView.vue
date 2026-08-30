@@ -3,20 +3,24 @@ import { ref, computed, onMounted } from 'vue';
 import LineChart from '../components/LineChart.vue';
 import Ring from '../components/Ring.vue';
 import MenuDropdown from '../components/MenuDropdown.vue';
-import { RACE_DAY, loadSeries, weeklyVolume } from '../data/fixtures';
+import { RACE_DAY, weeklyVolume } from '../data/fixtures';
 import {
-  loadSessions, loadWeighings, weekView, daysSince, latestInterval,
-  PACE_UNITS, paceOver, METRIC_COLS, DEFAULT_COLS, KIND_META, KINDS,
-  type Session, type Weighing, type PaceUnit,
+  loadSessions, loadWeighings, loadLoad, weekView, daysSince, latestInterval,
+  PACE_UNITS, paceOver, bandSide, adherence, METRIC_COLS, DEFAULT_COLS, KIND_META, KINDS,
+  type Session, type Weighing, type DayLoad, type PaceUnit,
 } from '../lib/training';
 
 const daysToRace = Math.ceil((RACE_DAY.getTime() - Date.now()) / 86400000);
-const last = loadSeries[loadSeries.length - 1];
-const tick = (arr: { date: string }[], i: number) => arr[i].date.slice(5);
+const tick = (arr: { date: string }[], i: number) => arr[i]?.date.slice(5) ?? '';
 
 // 真實資料：由 parse_logs.py 產生、launchd 每天 07:00 更新
 const sessions = ref<Session[]>([]);
 const weighings = ref<Weighing[]>([]);
+const load = ref<DayLoad[]>([]);
+
+// 圖只畫近 90 天;load.json 本身已經裁掉 CTL 未收斂的前 42 天
+const loadWindow = computed(() => load.value.slice(-90));
+const last = computed(() => loadWindow.value[loadWindow.value.length - 1] ?? null);
 const loadError = ref<string | null>(null);
 
 // 0 是本週，-1 是上週。往未來翻沒有意義，所以上限是 0
@@ -25,6 +29,10 @@ const week = computed(() => weekView(sessions.value, weekOffset.value));
 const staleDays = computed(() => daysSince(sessions.value));
 
 const interval = computed(() => latestInterval(sessions.value));
+const adhere = computed(() => (interval.value ? adherence(interval.value) : null));
+// 帶內／太慢／太快 —— 區間帶是雙向的，跑太快也不算達標
+const side = (sec: number) => bandSide(sec, interval.value?.plan?.band ?? null);
+const fmt400 = (sec: number) => `${Math.floor(sec / 60)}:${(sec % 60).toFixed(0).padStart(2, '0')}`;
 const latestWeight = computed(() => weighings.value[0] ?? null);
 // weights.json 是新到舊，畫圖要反過來
 const weightChart = computed(() => [...weighings.value].reverse());
@@ -46,7 +54,8 @@ function toggleCol(key: string) {
 
 onMounted(async () => {
   try {
-    [sessions.value, weighings.value] = await Promise.all([loadSessions(), loadWeighings()]);
+    [sessions.value, weighings.value, load.value] =
+      await Promise.all([loadSessions(), loadWeighings(), loadLoad()]);
   } catch (e) {
     loadError.value = e instanceof Error ? e.message : String(e);
   }
@@ -80,11 +89,13 @@ onMounted(async () => {
     </div>
     <div class="card">
       <h2 class="card-h">訓練狀態 TSB</h2>
-      <div class="stat" :class="last.tsb < -10 ? 'text-warn' : 'text-accent'">
+      <div v-if="last" class="stat" :class="last.tsb < -10 ? 'text-warn' : 'text-accent'">
         {{ last.tsb > 0 ? '+' : '' }}{{ last.tsb }}
       </div>
       <div class="sub">
-        ATL {{ last.atl }} / CTL {{ last.ctl }}{{ last.tsb < -10 ? '｜疲勞累積中' : '｜狀態可' }}
+        <template v-if="last">
+          ATL {{ last.atl }} / CTL {{ last.ctl }}{{ last.tsb < -10 ? '｜疲勞累積中' : '｜狀態可' }}
+        </template>
       </div>
     </div>
   </div>
@@ -93,25 +104,24 @@ onMounted(async () => {
     <div class="card">
       <h2 class="card-h">
         訓練負荷 ATL / CTL / TSB（近 90 天）
-        <span class="text-[10px] px-1.5 py-0.5 rounded border text-warn border-[#5c3a1c] ml-2">示意資料</span>
       </h2>
       <LineChart
         :series="[
-          { values: loadSeries.map((d) => d.atl), color: '#ff6b8b' },
-          { values: loadSeries.map((d) => d.ctl), color: '#23d3a0' },
-          { values: loadSeries.map((d) => d.tsb), color: '#7aa2ff' },
+          { values: loadWindow.map((d) => d.atl), color: '#ff6b8b' },
+          { values: loadWindow.map((d) => d.ctl), color: '#23d3a0' },
+          { values: loadWindow.map((d) => d.tsb), color: '#7aa2ff' },
         ]"
-        :x-ticks="[tick(loadSeries, 0), tick(loadSeries, 44), tick(loadSeries, 89)]"
+        :x-ticks="[tick(loadWindow, 0), tick(loadWindow, 44), tick(loadWindow, 89)]"
       />
       <div class="flex gap-3.5 text-xs text-dim mt-2 flex-wrap">
         <span><i class="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 bg-[#ff6b8b]" />ATL 短期疲勞</span>
         <span><i class="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 bg-accent" />CTL 長期體能</span>
         <span><i class="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 bg-[#7aa2ff]" />TSB 狀態</span>
       </div>
-      <div class="note note-warn mt-3">
-        這條曲線目前是合成的（`fixtures.ts` 裡的正弦波）。TRIMP 需要逐次訓練的
-        心率與時長，而 <code>sessions.json</code> 只有四個欄位 —— 要等 Day 17 接上
-        FIT 檔的心率資料才會變成真的。
+      <div class="note mt-3">
+        Banister TRIMP，靜止心率 47、最大心率 192（五次實測值）。
+        <strong>這條曲線只看得到跑步</strong> —— 重訓沒戴錶，Garmin 沒有那些活動的
+        心率，腿的痠不會出現在圖上。
       </div>
     </div>
 
@@ -240,6 +250,37 @@ onMounted(async () => {
       <template v-else>
       <div class="sub !mt-0 mb-2.5">{{ interval.summary }}</div>
 
+      <!-- 教練開的 vs 實際做的。達標與否一律以課表的區間帶為準 -->
+      <div v-if="interval.plan && adhere" class="note mb-3 flex flex-wrap gap-x-4 gap-y-1">
+        <span>
+          課表：{{ interval.plan.content }}
+          <template v-if="interval.plan.zone">
+            {{ interval.plan.zone }}區（{{ interval.plan.zone_code }}）
+          </template>
+          {{ interval.plan.distance }} ×{{ interval.plan.reps }}
+        </span>
+        <span v-if="interval.plan.band">
+          目標帶 {{ fmt400(interval.plan.band[0]) }}–{{ fmt400(interval.plan.band[1]) }} / 400m
+        </span>
+        <span :class="adhere.repsMet ? 'text-accent' : 'text-warn'">
+          趟數 {{ adhere.reps }}/{{ interval.plan.reps }}
+        </span>
+        <span v-if="adhere.paceTotal" :class="adhere.paceHit === adhere.paceTotal ? 'text-accent' : 'text-warn'">
+          對課表 {{ adhere.paceHit }}/{{ adhere.paceTotal }}
+        </span>
+        <span v-if="adhere.ownTotal" :class="adhere.ownHit === adhere.ownTotal ? 'text-accent' : 'text-warn'">
+          對當天目標 {{ adhere.ownHit }}/{{ adhere.ownTotal }}
+        </span>
+      </div>
+
+      <!-- 降階不是沒達標,是一個決定。兩個分母都報,差額才不會被抹掉 -->
+      <div v-if="interval.plan?.downshift" class="note note-warn mb-3">
+        這天採用的是<strong>降階表</strong>的
+        {{ interval.plan.zone }}區（{{ fmt400(interval.plan.adopted_sec!) }} / 400m），
+        比課表那一區慢。累的時候自行降速，不是沒跑到 ——
+        所以上面兩個分母才會差這麼多。
+      </div>
+
       <div v-if="!cols.length" class="sub py-6">欄位全關掉了，從右上角挑幾個回來。</div>
 
       <div v-else class="overflow-x-auto">
@@ -265,9 +306,10 @@ onMounted(async () => {
                 'text-warn': c.key === 'pace' && r.hit === false,
               }"
             >
-              <!-- hit 為 null 代表紀錄裡沒寫目標配速，不做判定 -->
+              <!-- hit 為 null 代表當天沒有課表可比，不做判定。
+                   ▲ 慢於帶上緣、▼ 快於帶下緣 —— 兩者都是沒跑在該跑的區 -->
               <template v-if="c.key === 'pace'">
-                {{ paceOver(r.per400_sec, paceUnit) }}{{ r.hit === false ? ' ▲' : '' }}
+                {{ paceOver(r.per400_sec, paceUnit) }}<template v-if="side(r.per400_sec) === 'slow'"> ▲</template><template v-else-if="side(r.per400_sec) === 'fast'"> ▼</template>
               </template>
               <template v-else-if="c.key === 'max_hr'">
                 {{ r.max_hr }}{{ (r.max_hr ?? 0) >= 190 ? ' 🔥' : '' }}
