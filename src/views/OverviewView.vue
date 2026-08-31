@@ -266,19 +266,18 @@ onMounted(async () => {
           趟數 {{ adhere.reps }}/{{ interval.plan.reps }}
         </span>
         <span v-if="adhere.paceTotal" :class="adhere.paceHit === adhere.paceTotal ? 'text-accent' : 'text-warn'">
-          對課表 {{ adhere.paceHit }}/{{ adhere.paceTotal }}
+          對 1A {{ adhere.paceHit }}/{{ adhere.paceTotal }}
         </span>
         <span v-if="adhere.ownTotal" :class="adhere.ownHit === adhere.ownTotal ? 'text-accent' : 'text-warn'">
-          對當天目標 {{ adhere.ownHit }}/{{ adhere.ownTotal }}
+          對當天配速 {{ adhere.ownHit }}/{{ adhere.ownTotal }}
         </span>
       </div>
 
-      <!-- 降階不是沒達標,是一個決定。兩個分母都報,差額才不會被抹掉 -->
-      <div v-if="interval.plan?.downshift" class="note note-warn mb-3">
-        這天採用的是<strong>降階表</strong>的
-        {{ interval.plan.zone }}區（{{ fmt400(interval.plan.adopted_sec!) }} / 400m），
-        比課表那一區慢。累的時候自行降速，不是沒跑到 ——
-        所以上面兩個分母才會差這麼多。
+<!-- 跑 1B 不是沒達標,是一個決定。兩個分母都報,差額才不會被抹掉 -->
+      <div v-if="interval.plan?.group === '1B'" class="note note-warn mb-3">
+        這天跑的是 <strong>1B 組</strong>的
+        {{ interval.plan.zone }}區（{{ fmt400(interval.plan.adopted_sec!) }} / 400m）。
+        課表開的區沒變，換的是配速表 —— 所以上面兩個分母才會差這麼多。
       </div>
 
       <div v-if="!cols.length" class="sub py-6">欄位全關掉了，從右上角挑幾個回來。</div>

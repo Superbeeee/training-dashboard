@@ -29,11 +29,11 @@ export interface Plan {
   reps: string;                 // '3~4'
   reps_lo: number | null;
   reps_hi: number | null;
-  /** 當天實際採用的目標（讀自 Garmin 活動名稱）。累的時候會自己降一階，
-   *  而那個決定除了活動名稱以外沒有別的地方留著。 */
+  /** 當天實際跑的配速目標（讀自 Garmin 活動名稱）。課表開的是「幾區」，
+   *  但跑 1A 還是 1B 的配速是當天決定的，而那個決定只留在活動名稱裡。 */
   adopted_sec: number | null;
   adopted_band: [number, number] | null;
-  downshift: boolean;           // true = 用了降階表的同一區
+  group: string | null;         // '1A' / '1B'；活動名稱沒寫目標就是 null
 }
 
 export type Kind = 'run' | 'bike' | 'swim' | 'lift';
@@ -71,9 +71,9 @@ export function bandSide(sec: number, band: [number, number] | null): 'slow' | '
 
 /** 這場課表的達成情形。
  *
- *  配速有兩個分母，而且**兩個都要報**：對課表開的那一區，以及對當天實際
- *  採用的目標。降階的日子這兩個數字會差很多 —— 那個差額不是誤差，是
- *  「這天我決定降速」的紀錄，只用其中一個講都會把它抹掉。 */
+ *  配速有兩個分母，而且**兩個都要報**：對 1A（作者掛的組），以及對當天
+ *  實際跑的那一組。跑 1B 的日子這兩個數字會差很多 —— 那個差額不是誤差，
+ *  是「這天我跑 1B」的紀錄，只用其中一個講都會把它抹掉。 */
 export function adherence(s: Session) {
   if (!s.plan) return null;
   const judged = s.reps.filter((r) => r.hit !== null);
