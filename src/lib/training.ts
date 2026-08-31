@@ -58,6 +58,9 @@ export interface Session {
   moves: number;         // 動作數，跑步為 0
   reps: Rep[];           // 間歇的分組明細；沒有「組」表就是空陣列
   plan: Plan | null;     // 當天課表；教練沒開就是 null
+  /** 我自己說的話，原話照收。距離、配速、心率裝得下當天的數字，
+   *  裝不下「吃不消」—— 而那句話往往才是解釋數字的唯一線索。 */
+  self_report: string | null;
 }
 
 /** 這一組是慢了、快了，還是落在帶內。

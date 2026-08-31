@@ -280,6 +280,12 @@ onMounted(async () => {
         課表開的區沒變，換的是配速表 —— 所以上面兩個分母才會差這麼多。
       </div>
 
+      <!-- 這句是他自己講的，不是從數字推出來的。所以擺在表格上面，
+           不然「800m」那三格看起來會像計畫中的安排 -->
+      <div v-if="interval.self_report" class="note mb-3">
+        <span class="text-dim">自述</span>　{{ interval.self_report }}
+      </div>
+
       <div v-if="!cols.length" class="sub py-6">欄位全關掉了，從右上角挑幾個回來。</div>
 
       <div v-else class="overflow-x-auto">
