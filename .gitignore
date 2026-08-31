@@ -23,8 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
-# 個人訓練資料 —— 由 personal-trainer 的 parse_logs.py 產生。
+# 個人訓練資料 —— 由 personal-trainer 的 parse_logs.py 與 trimp.py 產生。
 # 這個 repo 是公開的,體重與逐日訓練紀錄不進版控。
 # 產生方式見 README。
 public/sessions.json
 public/weights.json
+public/load.json
