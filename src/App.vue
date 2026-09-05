@@ -3,10 +3,12 @@ import { ref } from 'vue';
 import OverviewView from './views/OverviewView.vue';
 import Route3DView from './views/Route3DView.vue';
 import ScaleView from './views/ScaleView.vue';
+import RacesView from './views/RacesView.vue';
 
-type Tab = 'overview' | 'route' | 'scale';
+type Tab = 'overview' | 'races' | 'route' | 'scale';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: '總覽' },
+  { id: 'races', label: '六場全馬' },
   { id: 'route', label: '3D 路線' },
   { id: 'scale', label: '體重機' },
 ];
@@ -27,6 +29,7 @@ const tab = ref<Tab>('overview');
     </nav>
 
     <OverviewView v-if="tab === 'overview'" />
+    <RacesView v-else-if="tab === 'races'" />
     <Route3DView v-else-if="tab === 'route'" />
     <ScaleView v-else />
   </div>
