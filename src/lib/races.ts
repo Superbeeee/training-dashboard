@@ -17,12 +17,12 @@ export interface Race {
 
 /** 六場全馬。露點取自 Garmin 存的當日天氣（get_activity_weather）。 */
 export const RACES = [
-  { slug: 'fukuoka',  name: '福岡',       date: '2024-11-10', dew: 12.8, finish: 13044, km: 42.61 },
-  { slug: 'xinyi24',  name: '信義區 24',  date: '2024-12-15', dew: 10.6, finish: 12521, km: 42.58 },
-  { slug: 'testrace', name: 'TEST RACE', date: '2025-03-09', dew: 11.7, finish: 12879, km: 42.39 },
-  { slug: 'xinyi25',  name: '信義區 25',  date: '2025-12-21', dew: 17.2, finish: 12640, km: 42.45 },
-  { slug: 'tokyo',    name: '東京馬',     date: '2026-03-01', dew:  1.1, finish: 12127, km: 42.65 },
-  { slug: 'taitung',  name: '台東',       date: '2026-04-25', dew: 20.6, finish: 14214, km: 41.99 },
+  { slug: 'fukuoka',  name: '福岡馬',   date: '2024-11-10', dew: 12.8, finish: 13044, km: 42.61 },
+  { slug: 'xinyi24',  name: '臺北馬 24', date: '2024-12-15', dew: 10.6, finish: 12521, km: 42.58 },
+  { slug: 'testrace', name: '國道馬',   date: '2025-03-09', dew: 11.7, finish: 12879, km: 42.39 },
+  { slug: 'xinyi25',  name: '臺北馬 25', date: '2025-12-21', dew: 17.2, finish: 12640, km: 42.45 },
+  { slug: 'tokyo',    name: '東京馬',   date: '2026-03-01', dew:  1.1, finish: 12127, km: 42.65 },
+  { slug: 'taitung',  name: '台東馬'  , date: '2026-04-25', dew: 20.6, finish: 14214, km: 41.99 },
 ] as const;
 
 /** 秒 → m:ss。
