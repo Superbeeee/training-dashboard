@@ -72,6 +72,11 @@
   .note code {
     @apply bg-[#0b1017] px-1.5 py-px rounded text-xs text-accent;
   }
+  /* 計算機的輸入框與下拉 */
+  .inp {
+    @apply bg-panel-2 border border-line rounded px-2 py-1.5 text-fg text-[13px]
+           focus:outline-none focus:border-accent;
+  }
   /* 翻週的左右箭頭 */
   .wk-nav {
     @apply w-6 h-6 rounded border border-line text-dim leading-none

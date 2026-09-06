@@ -2,18 +2,19 @@
 /** 六場全馬疊圖。橫軸怎麼選是這頁的重點 —— 見 X_AXIS 的三段說明。 */
 import { ref, computed, onMounted } from 'vue';
 import RaceChart from '../components/RaceChart.vue';
+import { useReplay, stateAt, windowAt } from '../lib/replay';
 import { RACES, X_AXIS, loadRace, mmss, type Race, type XAxis } from '../lib/races';
 
 const loaded = ref<Race[]>([]);
 const error = ref<string | null>(null);
-const axis = ref<XAxis>('pct');
+const axis = ref<XAxis>('dist');
 const field = ref<'p' | 'hr'>('p');
 const off = ref<Set<string>>(new Set());
 
-// 顏色照露點排：越熱越紅。六場的完賽時間差 34 分鐘，而露點差 19.5 度
+// 顏色照氣溫排：越熱越紅。文獻說溫度是影響最顯著的環境變數（見 races.ts）
 const COLORS = ['#4ea8ff', '#3fc9c0', '#5ecb7a', '#e0c34a', '#ef8f4a', '#ff5c5c'];
-const byDew = [...RACES].sort((a, b) => a.dew - b.dew);
-const colorOf = (slug: string) => COLORS[byDew.findIndex((r) => r.slug === slug)] ?? '#888';
+const byTemp = [...RACES].sort((a, b) => a.temp - b.temp);
+const colorOf = (slug: string) => COLORS[byTemp.findIndex((r) => r.slug === slug)] ?? '#888';
 
 const shown = computed(() => loaded.value.filter((r) => !off.value.has(r.slug)));
 const meta = (slug: string) => RACES.find((r) => r.slug === slug)!;
@@ -28,12 +29,7 @@ function toggle(slug: string) {
   // 全部關掉的話圖是空的,至少留一場
   if (s.size < RACES.length) off.value = s;
 }
-/** 只看這一場。六條疊在一起要看單場細節時用。 */
-function solo(slug: string) {
-  off.value = new Set(RACES.filter((r) => r.slug !== slug).map((r) => r.slug));
-}
 const allOn = computed(() => off.value.size === 0);
-const soloed = computed(() => off.value.size === RACES.length - 1);
 
 onMounted(async () => {
   try {
@@ -44,6 +40,47 @@ onMounted(async () => {
 });
 
 const total = computed(() => loaded.value.reduce((n, r) => n + r.points.length, 0));
+
+// ── 回放 ────────────────────────────────────────────────
+// 最長那場決定總長度,不然台東還沒跑完就停了
+const longest = computed(() => Math.max(0, ...shown.value.map((r) => r.points.at(-1)?.t ?? 0)));
+const rp = useReplay(() => longest.value);
+const SPEEDS = [30, 60, 120, 300];
+
+/** 播放頭在圖上的位置。橫軸是什麼單位,它就要換算成什麼單位。 */
+const playhead = computed(() => {
+  if (!rp.t.value && !rp.playing.value) return null;
+  // 兩條軸都沒有單一對應 —— 六場在同一秒跑到的距離不同。
+  // 用「顯示中第一場」的位置當基準,其餘靠圓點各自標示。
+  const lead = shown.value[0];
+  if (!lead) return null;
+  const s = stateAt(lead.points, rp.t.value);
+  if (!s) return null;
+  return axis.value === 'dist' ? s.d : s.t / (lead.points.at(-1)!.t || 1);
+});
+
+/** 六場在當下這一秒的狀態。這份清單同時當圖例、選擇器與即時看板 ——
+ *  閒置時顯示成績,播放時換成當下的距離、配速、心率。 */
+const live = computed(() =>
+  RACES.map((r) => {
+    const race = loaded.value.find((x) => x.slug === r.slug);
+    const on = !off.value.has(r.slug);
+    const s = race && on ? stateAt(race.points, rp.t.value) : null;
+    const w = race && on ? windowAt(race.points, rp.t.value) : { pace: null, hr: null };
+    return { ...r, on, color: colorOf(r.slug), dist: s?.d ?? null, ...w,
+             done: !!race && rp.t.value >= (race.points.at(-1)?.t ?? 0) };
+  }),
+);
+
+/** 播放中依當下距離排名;沒播放就照氣溫排(跟顏色一致) */
+const ranked = computed(() => {
+  if (!replaying.value) return live.value;
+  return [...live.value].sort((a, b) => (b.dist ?? -1) - (a.dist ?? -1));
+});
+const replaying = computed(() => rp.t.value > 0);
+
+const clock = (sec: number) =>
+  `${Math.floor(sec / 3600)}:${String(Math.floor(sec % 3600 / 60)).padStart(2, '0')}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 </script>
 
 <template>
@@ -54,51 +91,93 @@ const total = computed(() => loaded.value.reduce((n, r) => n + r.points.length, 
     <div class="card">
       <div class="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <h2 class="card-h !mb-0">六場全馬疊圖</h2>
-        <div class="flex gap-1.5 flex-wrap">
-          <button
-            v-for="f in [{ k: 'p', l: '配速' }, { k: 'hr', l: '心率' }]" :key="f.k"
-            class="pill" :class="{ 'pill-on': field === f.k }"
-            @click="field = f.k as 'p' | 'hr'"
-          >{{ f.l }}</button>
-          <span class="w-2" />
-          <button
-            v-for="(v, k) in X_AXIS" :key="k"
-            class="pill" :class="{ 'pill-on': axis === k }"
-            @click="axis = k as XAxis"
-          >{{ v.label }}</button>
+        <div class="flex gap-4 flex-wrap items-center">
+          <span class="flex items-center gap-1.5">
+            <span class="text-[11px] text-dim">縱軸</span>
+            <button
+              v-for="f in [{ k: 'p', l: '配速' }, { k: 'hr', l: '心率' }]" :key="f.k"
+              class="pill" :class="{ 'pill-on': field === f.k }"
+              @click="field = f.k as 'p' | 'hr'"
+            >{{ f.l }}</button>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="text-[11px] text-dim">橫軸</span>
+            <button
+              v-for="(v, k) in X_AXIS" :key="k"
+              class="pill" :class="{ 'pill-on': axis === k }"
+              :title="v.hint"
+              @click="axis = k as XAxis"
+            >{{ v.label }}</button>
+          </span>
         </div>
       </div>
 
-      <RaceChart :races="shown" :axis="axis" :field="field" :color-of="colorOf" />
+      <RaceChart :races="shown" :axis="axis" :field="field" :color-of="colorOf" :playhead="playhead" />
 
-      <div class="flex items-center gap-2 flex-wrap mt-3">
-        <span class="text-[11px] text-dim uppercase tracking-wide mr-1">顯示</span>
-        <button
-          v-for="r in RACES" :key="r.slug"
-          type="button"
-          class="flex items-center gap-1.5 text-[12px] rounded border px-2 py-1 cursor-pointer
-                 transition-opacity"
-          :class="off.has(r.slug)
-            ? 'opacity-40 border-[#243040] text-dim'
-            : 'border-[#33465c] text-fg'"
-          :title="off.has(r.slug) ? '點一下顯示' : '點一下隱藏'"
-          @click="toggle(r.slug)"
-        >
-          <span class="w-3 text-center" :style="{ color: colorOf(r.slug) }">
-            {{ off.has(r.slug) ? '○' : '●' }}
-          </span>
-          {{ r.name }}
-          <span class="text-dim">{{ r.dew }}°</span>
+      <!-- 回放。資料早就在瀏覽器裡了,這裡只是按時間軸重讀一遍 -->
+      <div class="flex items-center gap-2.5 mt-3 flex-wrap">
+        <button class="pill pill-on !px-3" @click="rp.toggle()">
+          {{ rp.playing.value ? '暫停' : '播放' }}
         </button>
-
-        <span class="w-1" />
-        <button type="button" class="pill" :disabled="allOn"
-                :class="{ 'opacity-40 cursor-not-allowed': allOn }"
-                @click="off = new Set()">全部顯示</button>
+        <span class="tnum text-[13px] w-[72px]">{{ clock(rp.t.value) }}</span>
+        <input
+          type="range" class="flex-1 min-w-[140px] accent-[#23d3a0]"
+          :min="0" :max="longest" :value="rp.t.value"
+          @input="rp.seek(+($event.target as HTMLInputElement).value)"
+        >
+        <span class="flex gap-1">
+          <button
+            v-for="s in SPEEDS" :key="s" class="pill !px-2 text-[11px]"
+            :class="{ 'pill-on': rp.speed.value === s }"
+            @click="rp.speed.value = s"
+          >{{ s }}×</button>
+        </span>
+        <button v-if="replaying" class="pill !px-2 text-[11px]" @click="rp.seek(0)">歸零</button>
       </div>
 
-      <div class="sub !mt-2">
-        想單看一場，按下面表格那一列的「只看」。
+      <!-- 一份清單三個角色:圖例、選擇器、即時看板。
+           點一下切換顯示;播放時整列換成當下的距離/配速/心率並依名次重排 -->
+      <div class="mt-3 border-t border-line">
+        <button
+          v-for="(l, i) in ranked" :key="l.slug"
+          type="button"
+          class="w-full flex items-center gap-2.5 text-[13px] tnum py-2 px-1
+                 border-b border-[#1d2632] cursor-pointer text-left
+                 hover:bg-[#161f2b] transition-colors"
+          :class="l.on ? '' : 'opacity-35'"
+          :title="l.on ? '點一下隱藏' : '點一下顯示'"
+          @click="toggle(l.slug)"
+        >
+          <span v-if="replaying && l.on" class="w-4 text-dim text-[11px]">{{ i + 1 }}</span>
+          <span
+            class="w-2.5 h-2.5 rounded-sm shrink-0"
+            :style="{ background: l.on ? l.color : 'transparent',
+                      boxShadow: l.on ? 'none' : `inset 0 0 0 1.5px ${l.color}` }"
+          />
+          <span class="flex-1 truncate">{{ l.name }}</span>
+
+          <template v-if="replaying && l.on">
+            <span class="w-14 text-right">{{ l.dist != null ? (l.dist / 1000).toFixed(2) + 'k' : '—' }}</span>
+            <span class="w-16 text-right">{{ l.pace ? mmss(l.pace) : '—' }}</span>
+            <span class="w-12 text-right" :class="l.hr && l.hr >= 175 ? 'text-warn' : ''">
+              {{ l.hr ? l.hr.toFixed(0) : '—' }}
+            </span>
+            <span class="w-8 text-right text-[11px] text-accent">{{ l.done ? '完賽' : '' }}</span>
+          </template>
+          <template v-else>
+            <span class="w-16 text-right text-dim">{{ hhmm(l.finish) }}</span>
+            <span class="w-16 text-right text-dim">{{ pace(l) }}</span>
+            <span class="w-12 text-right text-dim">{{ l.temp }}°</span>
+            <span class="w-8" />
+          </template>
+        </button>
+
+        <div class="flex items-center justify-between pt-2 text-[11px] text-dim">
+          <span>{{ replaying ? '距離 · 配速 · 心率（30 秒平均）' : '完賽 · 配速 · 氣溫' }}</span>
+          <button v-if="!allOn" class="pill !px-2 !py-0.5 text-[11px]" @click="off = new Set()">
+            全部顯示
+          </button>
+        </div>
       </div>
 
       <div class="note mt-3">{{ X_AXIS[axis].hint }}</div>
@@ -125,12 +204,12 @@ const total = computed(() => loaded.value.reduce((n, r) => n + r.points.length, 
     </div>
 
     <div class="card mt-3.5">
-      <h2 class="card-h">六場對照</h2>
+      <h2 class="card-h">六場明細</h2>
       <div class="overflow-x-auto">
         <table class="w-full text-[13px] border-collapse tnum">
           <thead>
             <tr class="text-dim text-[11px] uppercase tracking-wide">
-              <th v-for="h in ['賽事', '日期', '完賽', '配速', '距離', '露點', '逐秒點數', '']" :key="h"
+              <th v-for="h in ['賽事', '日期', '完賽', '配速', '距離', '氣溫', '露點', '逐秒點數']" :key="h"
                   class="text-left py-2 px-2.5 border-b border-line font-semibold whitespace-nowrap">{{ h }}</th>
             </tr>
           </thead>
@@ -144,15 +223,9 @@ const total = computed(() => loaded.value.reduce((n, r) => n + r.points.length, 
               <td class="py-2 px-2.5">{{ hhmm(meta(r.slug).finish) }}</td>
               <td class="py-2 px-2.5">{{ pace(meta(r.slug)) }}/km</td>
               <td class="py-2 px-2.5 text-dim">{{ meta(r.slug).km }} km</td>
-              <td class="py-2 px-2.5" :class="meta(r.slug).dew >= 20 ? 'text-warn' : ''">{{ meta(r.slug).dew }}°</td>
+              <td class="py-2 px-2.5" :class="meta(r.slug).temp >= 22 ? 'text-warn' : ''">{{ meta(r.slug).temp }}°</td>
+              <td class="py-2 px-2.5 text-dim">{{ meta(r.slug).dew }}°</td>
               <td class="py-2 px-2.5 text-dim">{{ r.points.length.toLocaleString() }}</td>
-              <td class="py-2 px-2.5">
-                <button
-                  type="button" class="pill !py-0.5 !px-2 text-[11px]"
-                  :class="{ 'pill-on': soloed && !off.has(r.slug) }"
-                  @click="soloed && !off.has(r.slug) ? off = new Set() : solo(r.slug)"
-                >{{ soloed && !off.has(r.slug) ? '看全部' : '只看' }}</button>
-              </td>
             </tr>
           </tbody>
         </table>

@@ -18,6 +18,8 @@ const props = defineProps<{
   field: 'hr' | 'p';
   colorOf: (slug: string) => string;
   height?: number;
+  /** 回放的播放頭位置（跟橫軸同一個單位）。null = 沒在回放 */
+  playhead?: number | null;
 }>();
 
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -81,6 +83,23 @@ function draw() {
     c.strokeStyle = '#4a5768'; c.lineWidth = 1;
     c.beginPath(); c.moveTo(hx, PAD.t); c.lineTo(hx, h - PAD.b); c.stroke();
   }
+
+  // 播放頭：一條線加上每場當下位置的圓點
+  if (props.playhead != null) {
+    const hx = px(props.playhead);
+    c.strokeStyle = '#e8eef6'; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(hx, PAD.t); c.lineTo(hx, h - PAD.b); c.stroke();
+
+    for (const s of curves.value) {
+      // 找出這條線在播放頭左側的最後一個點
+      let cur = null;
+      for (const pt of s.pts) { if (pt.x > props.playhead) break; cur = pt; }
+      if (!cur) continue;
+      c.fillStyle = s.color;
+      c.beginPath(); c.arc(hx, py(cur.y), 3.5, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = '#0b1017'; c.lineWidth = 1.2; c.stroke();
+    }
+  }
 }
 
 function onMove(e: MouseEvent) {
@@ -104,7 +123,7 @@ function onMove(e: MouseEvent) {
 }
 
 onMounted(() => { draw(); window.addEventListener('resize', draw); });
-watch([curves, H], draw);
+watch([curves, H, () => props.playhead], draw);
 </script>
 
 <template>
