@@ -28,7 +28,7 @@ export const RACES = [
   { slug: 'testrace', name: '國道馬',   date: '2025-03-09', temp: 16.7, dew: 11.7, rh: 74, finish: 12879, km: 42.39 },
   { slug: 'xinyi25',  name: '臺北馬 25', date: '2025-12-21', temp: 20.0, dew: 17.2, rh: 84, finish: 12640, km: 42.45 },
   { slug: 'tokyo',    name: '東京馬',   date: '2026-03-01', temp: 12.2, dew:  1.1, rh: 35, finish: 12127, km: 42.65 },
-  { slug: 'taitung',  name: '台東馬',   date: '2026-04-25', temp: 24.4, dew: 20.6, rh: 81, finish: 14214, km: 41.99 },
+  { slug: 'taitung',  name: '台東 CT',   date: '2026-04-25', temp: 24.4, dew: 20.6, rh: 81, finish: 14214, km: 41.99 },
 ] as const;
 
 /** 秒 → m:ss。
@@ -67,6 +67,24 @@ export const X_AXIS: Record<XAxis, { label: string; hint: string }> = {
 const xOf = (p: RacePoint, r: Race, axis: XAxis, last: RacePoint) =>
   axis === 'dist' ? p.d : p.t / (last.t || 1);
 
+/** 移動平均。
+ *
+ *  GPS 逐秒配速抖得很兇 —— 同一段路可能在 4:30 和 5:10 之間跳。直接畫出來
+ *  是一片鋸齒,六條疊在一起就糊成一團,看不出趨勢。
+ *
+ *  **這不是點太多造成的**,降採樣解決不了:LTTB 挑的是「偏離直線最遠的點」,
+ *  而鋸齒的尖端正好符合那個條件,壓完只會保留最極端的雜訊。要先平滑再取樣。 */
+function smooth(vals: (number | null)[], window: number): (number | null)[] {
+  const half = Math.floor(window / 2);
+  return vals.map((_, i) => {
+    let s = 0, n = 0;
+    for (let j = Math.max(0, i - half); j < Math.min(vals.length, i + half + 1); j++) {
+      if (vals[j] != null) { s += vals[j]!; n++; }
+    }
+    return n ? s / n : null;
+  });
+}
+
 /** 取一場的曲線，降採樣到 width 個點左右。
  *  螢幕寬度就那麼多像素，畫一萬兩千個點只是在燒 DOM。 */
 export function curve(
@@ -76,13 +94,31 @@ export function curve(
   width = 800,
 ): { x: number; y: number }[] {
   const last = race.points[race.points.length - 1];
-  const pts = race.points.filter((p) => p[field] != null);
+  const raw = race.points.filter((p) => p[field] != null);
+
+  // 先平滑再降採樣。配速抖得比心率兇很多,窗口開大一點。
+  // 預覽檔已經壓到 900 點,所以一個「點」不再等於一秒 —— 窗口用相對值。
+  const win = Math.max(3, Math.round(raw.length * (field === 'p' ? 0.02 : 0.01)));
+  const sm = smooth(raw.map((p) => p[field]), win);
+  const pts = raw.map((p, i) => ({ ...p, [field]: sm[i] })) as typeof raw;
+
   const sampled = lttb(pts, width, (p) => xOf(p, race, axis, last), (p) => p[field] as number);
   return sampled.map((p) => ({ x: xOf(p, race, axis, last), y: p[field] as number }));
 }
 
-export async function loadRace(slug: string): Promise<Race> {
-  const res = await fetch(`/races/${slug}.json`);
-  if (!res.ok) throw new Error(`/races/${slug}.json → HTTP ${res.status}`);
+/** 讀一場比賽。
+ *
+ *  預設拿預覽檔(`.min.json`,每場 42 KB,已預先壓到 900 點)。六場合計
+ *  262 KB,而完整檔是 3.5 MB —— 差 13 倍,而畫面上根本畫不到那麼多點。
+ *
+ *  900 這個數字是刻意訂的:圖上最多只畫到畫布寬度的八成(桌機約 640、
+ *  手機約 272),所以 900 點對任何螢幕都夠用,前端再跑一次 LTTB 就得到
+ *  正確的點數。**預先壓過不會讓畫面變糊**,因為它還是比要畫的點多。
+ *
+ *  full=true 才抓完整逐秒檔 —— 目前只有需要看單場細節時才用得上。 */
+export async function loadRace(slug: string, full = false): Promise<Race> {
+  const url = `/races/${slug}${full ? '' : '.min'}.json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
   return { slug, ...(await res.json()) };
 }

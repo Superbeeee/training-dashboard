@@ -24,17 +24,29 @@ const props = defineProps<{
 
 const canvas = ref<HTMLCanvasElement | null>(null);
 const box = ref<HTMLDivElement | null>(null);
+// 畫布實際寬度。降採樣的點數要跟著它走 —— 桌機 800px 和手機 340px
+// 用同一個點數的話,手機上每個像素會擠三倍的點,線糊成一團
+const cw = ref(800);
 const hover = ref<{ x: number; y: number; race: string; val: number } | null>(null);
 const H = computed(() => props.height ?? 260);
-const PAD = { l: 46, r: 12, t: 12, b: 26 };
+// 窄螢幕把左邊留給刻度的空間縮小,不然畫線的區域被吃掉太多
+const PAD = computed(() => ({ l: cw.value < 480 ? 38 : 46, r: 12, t: 12, b: 26 }));
 
-// 降採樣後的曲線。切換橫軸或欄位才重算,不是每次重繪都算
+/** 每條線要留幾個點。
+ *
+ *  一個像素只畫得出一個位置,所以點數超過像素寬度就是白算。但也不能
+ *  剛好等於寬度 —— 六條線疊在一起的時候,每條都塞滿會糊成一片,
+ *  所以取寬度的八成,線之間才有空隙。
+ *  手機(~340px)因此只留 270 點左右,桌機(~800px)是 640。 */
+const samples = computed(() => Math.max(120, Math.round(cw.value * 0.8)));
+
+// 降採樣後的曲線。寬度、橫軸或欄位變了才重算,不是每次重繪都算
 const curves = computed(() =>
   props.races.map((r) => ({
     slug: r.slug,
     name: r.name,
     color: props.colorOf(r.slug),
-    pts: curve(r, props.axis, props.field, 900),
+    pts: curve(r, props.axis, props.field, samples.value),
   })),
 );
 
@@ -45,6 +57,7 @@ function draw() {
   // Retina：canvas 的像素緩衝要乘上 devicePixelRatio,不然線是糊的
   const dpr = window.devicePixelRatio || 1;
   const w = wrap.clientWidth, h = H.value;
+  if (w !== cw.value) cw.value = w;    // 寬度變了要重新降採樣
   cv.width = w * dpr; cv.height = h * dpr;
   cv.style.width = `${w}px`; cv.style.height = `${h}px`;
 
@@ -53,25 +66,35 @@ function draw() {
   c.clearRect(0, 0, w, h);
 
   const all = curves.value.flatMap((s) => s.pts);
-  const xs = all.map((p) => p.x), ys = all.map((p) => p.y);
+  const xs = all.map((p) => p.x);
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const px = (x: number) => PAD.l + ((x - x0) / (x1 - x0 || 1)) * (w - PAD.l - PAD.r);
+
+  // Y 軸取百分位不取 min/max。一場全馬裡總有幾秒是停下來的 —— 等紅燈、
+  // 補給、綁鞋帶 —— 那幾秒的配速會算出 70 分/km。用 max 的話那一個點
+  // 會把整條軸撐開,4~6 分/km 的真實資料全部壓成上緣一條線。
+  // (台東 CT 實測最慢 74.4 分/km,而 95 百分位是 10.3。)
+  const sorted = all.map((p) => p.y).sort((a, b) => a - b);
+  const q = (f: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * f))];
+  const y0 = q(0.01), y1 = q(0.98);
+  const px = (x: number) => PAD.value.l + ((x - x0) / (x1 - x0 || 1)) * (w - PAD.value.l - PAD.value.r);
   // 配速的 y 軸要反過來 —— 秒數小 = 跑得快 = 該在上面
   const py = (y: number) => {
-    const n = (y - y0) / (y1 - y0 || 1);
-    return PAD.t + (props.field === 'p' ? n : 1 - n) * (h - PAD.t - PAD.b);
+    // 夾在 0~1 —— 超出百分位範圍的點畫在邊緣,而不是飛出畫布外
+    const n = Math.max(0, Math.min(1, (y - y0) / (y1 - y0 || 1)));
+    return PAD.value.t + (props.field === 'p' ? n : 1 - n) * (h - PAD.value.t - PAD.value.b);
   };
 
   c.strokeStyle = '#243040'; c.lineWidth = 1;
   c.font = '10px system-ui'; c.fillStyle = '#8b98a8';
   for (let i = 0; i <= 2; i++) {
     const v = y0 + ((y1 - y0) / 2) * i, y = py(v);
-    c.beginPath(); c.moveTo(PAD.l, y); c.lineTo(w - PAD.r, y); c.stroke();
+    c.beginPath(); c.moveTo(PAD.value.l, y); c.lineTo(w - PAD.value.r, y); c.stroke();
     c.fillText(props.field === 'p' ? mmss(v) : v.toFixed(0), 4, y + 3);
   }
 
-  c.lineWidth = 1.6; c.lineJoin = 'round';
+  // 窄螢幕線細一點,六條疊在一起才不會糊成一片
+  c.lineWidth = w < 480 ? 1.1 : 1.6;
+  c.lineJoin = 'round';
   for (const s of curves.value) {
     c.strokeStyle = s.color; c.beginPath();
     s.pts.forEach((p, i) => (i ? c.lineTo(px(p.x), py(p.y)) : c.moveTo(px(p.x), py(p.y))));
@@ -81,14 +104,14 @@ function draw() {
   if (hover.value) {
     const hx = px(hover.value.x);
     c.strokeStyle = '#4a5768'; c.lineWidth = 1;
-    c.beginPath(); c.moveTo(hx, PAD.t); c.lineTo(hx, h - PAD.b); c.stroke();
+    c.beginPath(); c.moveTo(hx, PAD.value.t); c.lineTo(hx, h - PAD.value.b); c.stroke();
   }
 
   // 播放頭：一條線加上每場當下位置的圓點
   if (props.playhead != null) {
     const hx = px(props.playhead);
     c.strokeStyle = '#e8eef6'; c.lineWidth = 1.5;
-    c.beginPath(); c.moveTo(hx, PAD.t); c.lineTo(hx, h - PAD.b); c.stroke();
+    c.beginPath(); c.moveTo(hx, PAD.value.t); c.lineTo(hx, h - PAD.value.b); c.stroke();
 
     for (const s of curves.value) {
       // 找出這條線在播放頭左側的最後一個點
@@ -109,7 +132,7 @@ function onMove(e: MouseEvent) {
   const xs = all.map((p) => p.x);
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
   const rx = e.clientX - wrap.getBoundingClientRect().left;
-  const xv = x0 + ((rx - PAD.l) / (w - PAD.l - PAD.r)) * (x1 - x0);
+  const xv = x0 + ((rx - PAD.value.l) / (w - PAD.value.l - PAD.value.r)) * (x1 - x0);
 
   // Canvas 沒有 DOM 可以掛事件,最近點得自己找
   let best: typeof hover.value = null, bd = Infinity;

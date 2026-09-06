@@ -137,7 +137,10 @@ const clock = (sec: number) =>
 
       <!-- 一份清單三個角色:圖例、選擇器、即時看板。
            點一下切換顯示;播放時整列換成當下的距離/配速/心率並依名次重排 -->
-      <div class="mt-3 border-t border-line">
+      <!-- @container:讓底下的斷點看「這個容器」而不是視窗寬度。
+           用 sm: 的話,把儀表板放進窄欄位時 media query 不會觸發 ——
+           而 canvas 的降採樣量的是容器寬度,兩邊判準不一致就會對不上 -->
+      <div class="@container mt-3 border-t border-line">
         <button
           v-for="(l, i) in ranked" :key="l.slug"
           type="button"
@@ -154,26 +157,32 @@ const clock = (sec: number) =>
             :style="{ background: l.on ? l.color : 'transparent',
                       boxShadow: l.on ? 'none' : `inset 0 0 0 1.5px ${l.color}` }"
           />
-          <span class="flex-1 truncate">{{ l.name }}</span>
+          <span class="flex-1 min-w-0 truncate">{{ l.name }}</span>
 
           <template v-if="replaying && l.on">
             <span class="w-14 text-right">{{ l.dist != null ? (l.dist / 1000).toFixed(2) + 'k' : '—' }}</span>
             <span class="w-16 text-right">{{ l.pace ? mmss(l.pace) : '—' }}</span>
-            <span class="w-12 text-right" :class="l.hr && l.hr >= 175 ? 'text-warn' : ''">
+            <span class="w-12 text-right hidden @sm:inline" :class="l.hr && l.hr >= 175 ? 'text-warn' : ''">
               {{ l.hr ? l.hr.toFixed(0) : '—' }}
             </span>
-            <span class="w-8 text-right text-[11px] text-accent">{{ l.done ? '完賽' : '' }}</span>
+            <span class="w-8 text-right text-[11px] text-accent hidden @sm:inline">{{ l.done ? '完賽' : '' }}</span>
           </template>
           <template v-else>
             <span class="w-16 text-right text-dim">{{ hhmm(l.finish) }}</span>
-            <span class="w-16 text-right text-dim">{{ pace(l) }}</span>
-            <span class="w-12 text-right text-dim">{{ l.temp }}°</span>
-            <span class="w-8" />
+            <!-- 窄螢幕藏掉配速與氣溫,把寬度讓給名稱 ——
+                 名稱被截成「臺北⋯」的話,兩場臺北馬就分不出來了 -->
+            <span class="w-16 text-right text-dim hidden @sm:inline">{{ pace(l) }}</span>
+            <span class="w-12 text-right text-dim hidden @sm:inline">{{ l.temp }}°</span>
+            <span class="w-8 hidden @sm:inline" />
           </template>
         </button>
 
         <div class="flex items-center justify-between pt-2 text-[11px] text-dim">
-          <span>{{ replaying ? '距離 · 配速 · 心率（30 秒平均）' : '完賽 · 配速 · 氣溫' }}</span>
+          <!-- 窄容器藏掉了後面幾欄,說明文字要跟著變,不然會標到看不見的欄位 -->
+          <span class="@sm:hidden">{{ replaying ? '距離 · 配速（30 秒平均）' : '完賽時間' }}</span>
+          <span class="hidden @sm:inline">
+            {{ replaying ? '距離 · 配速 · 心率（30 秒平均）' : '完賽 · 配速 · 氣溫' }}
+          </span>
           <button v-if="!allOn" class="pill !px-2 !py-0.5 text-[11px]" @click="off = new Set()">
             全部顯示
           </button>
