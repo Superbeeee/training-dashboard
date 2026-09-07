@@ -74,14 +74,22 @@ const xOf = (p: RacePoint, r: Race, axis: XAxis, last: RacePoint) =>
  *
  *  **這不是點太多造成的**,降採樣解決不了:LTTB 挑的是「偏離直線最遠的點」,
  *  而鋸齒的尖端正好符合那個條件,壓完只會保留最極端的雜訊。要先平滑再取樣。 */
-function smooth(vals: (number | null)[], window: number): (number | null)[] {
-  const half = Math.floor(window / 2);
-  return vals.map((_, i) => {
-    let s = 0, n = 0;
-    for (let j = Math.max(0, i - half); j < Math.min(vals.length, i + half + 1); j++) {
-      if (vals[j] != null) { s += vals[j]!; n++; }
+function smooth(pts: RacePoint[], field: 'hr' | 'p', seconds: number): (number | null)[] {
+  // 窗口用**時間**不用點數。預覽檔已經 LTTB 壓過,點跟點之間平均隔 13.5 秒
+  // 而且不等距 —— 拿點數當窗口的話,18 個點就是 4 分鐘,會把 35K 那種
+  // 一兩分鐘內發生的崩盤一起抹平。
+  const half = seconds / 2;
+  let lo = 0, hi = 0, sum = 0, n = 0;
+  return pts.map((p) => {
+    while (hi < pts.length && pts[hi].t <= p.t + half) {
+      if (pts[hi][field] != null) { sum += pts[hi][field]!; n++; }
+      hi++;
     }
-    return n ? s / n : null;
+    while (pts[lo].t < p.t - half) {
+      if (pts[lo][field] != null) { sum -= pts[lo][field]!; n--; }
+      lo++;
+    }
+    return n ? sum / n : null;
   });
 }
 
@@ -96,10 +104,8 @@ export function curve(
   const last = race.points[race.points.length - 1];
   const raw = race.points.filter((p) => p[field] != null);
 
-  // 先平滑再降採樣。配速抖得比心率兇很多,窗口開大一點。
-  // 預覽檔已經壓到 900 點,所以一個「點」不再等於一秒 —— 窗口用相對值。
-  const win = Math.max(3, Math.round(raw.length * (field === 'p' ? 0.02 : 0.01)));
-  const sm = smooth(raw.map((p) => p[field]), win);
+  // 先平滑再降採樣。配速抖得比心率兇,窗口開大一點,但都以秒為單位。
+  const sm = smooth(raw, field, field === 'p' ? 60 : 30);
   const pts = raw.map((p, i) => ({ ...p, [field]: sm[i] })) as typeof raw;
 
   const sampled = lttb(pts, width, (p) => xOf(p, race, axis, last), (p) => p[field] as number);

@@ -37,6 +37,12 @@ onMounted(async () => {
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
+  // 手機上預設只開三場。六條線疊在 300px 寬的圖裡本來就分不開 ——
+  // 與其給一團看不懂的東西再叫使用者自己關,不如先給看得懂的,
+  // 想比全部再自己開。桌機空間夠,維持六條全開。
+  if (window.innerWidth < 480) {
+    off.value = new Set(['xinyi24', 'testrace', 'fukuoka']);
+  }
 });
 
 const total = computed(() => loaded.value.reduce((n, r) => n + r.points.length, 0));

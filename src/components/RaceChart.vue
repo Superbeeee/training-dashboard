@@ -7,7 +7,12 @@
  * Canvas 沒有 DOM，畫完就是像素。
  *
  * 代價是失去 DOM 帶來的東西：沒有 hover 事件、沒有 CSS、螢幕閱讀器讀不到。
- * 所以 hover 要自己算最近點（見 onMove），無障礙靠底下的表格補。
+ * 所以 hover 要自己算最近點（見 pick），無障礙靠底下的表格補。
+ *
+ * 觸控是另一筆債。桌機是「滑到哪顯示哪」，但手機沒有 hover 這個狀態 ——
+ * 手指碰到螢幕就已經是按下去了。若照搬 touchmove，就得 preventDefault
+ * 擋掉捲動，而這張圖佔了螢幕一大半，使用者會覺得頁面卡住。
+ * 所以觸控改成**點一下顯示、再點別處換位置**，捲動完全不受影響。
  */
 import { ref, watch, onMounted, computed } from 'vue';
 import { curve, mmss, type Race, type XAxis } from '../lib/races';
@@ -28,7 +33,8 @@ const box = ref<HTMLDivElement | null>(null);
 // 用同一個點數的話,手機上每個像素會擠三倍的點,線糊成一團
 const cw = ref(800);
 const hover = ref<{ x: number; y: number; race: string; val: number } | null>(null);
-const H = computed(() => props.height ?? 260);
+// 窄螢幕反而要更高。橫向被壓縮之後,六條線只剩垂直方向可以分開
+const H = computed(() => props.height ?? (cw.value < 480 ? 320 : 260));
 // 窄螢幕把左邊留給刻度的空間縮小,不然畫線的區域被吃掉太多
 const PAD = computed(() => ({ l: cw.value < 480 ? 38 : 46, r: 12, t: 12, b: 26 }));
 
@@ -70,12 +76,15 @@ function draw() {
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
 
   // Y 軸取百分位不取 min/max。一場全馬裡總有幾秒是停下來的 —— 等紅燈、
-  // 補給、綁鞋帶 —— 那幾秒的配速會算出 70 分/km。用 max 的話那一個點
-  // 會把整條軸撐開,4~6 分/km 的真實資料全部壓成上緣一條線。
-  // (台東 CT 實測最慢 74.4 分/km,而 95 百分位是 10.3。)
+  // 補給、綁鞋帶 —— 那幾秒的配速會算出 70 分/km,用 max 的話整條軸會被
+  // 那一個點撐開。
+  //
+  // 但 98 百分位還是太寬:六場實測 1~98% 跨 4.4~9.2 分/km,而中間 50%
+  // 的資料只佔 4.7~5.3 —— **一半以上的資料被壓在上緣 16% 的高度裡**,
+  // 六條線當然分不開。收到 92%,把畫面讓給真正在跑的那一段。
   const sorted = all.map((p) => p.y).sort((a, b) => a - b);
   const q = (f: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * f))];
-  const y0 = q(0.01), y1 = q(0.98);
+  const y0 = q(0.02), y1 = q(0.92);
   const px = (x: number) => PAD.value.l + ((x - x0) / (x1 - x0 || 1)) * (w - PAD.value.l - PAD.value.r);
   // 配速的 y 軸要反過來 —— 秒數小 = 跑得快 = 該在上面
   const py = (y: number) => {
@@ -125,13 +134,14 @@ function draw() {
   }
 }
 
-function onMove(e: MouseEvent) {
+/** 由畫面上的 x 座標找出最近的資料點。滑鼠與觸控共用。 */
+function pick(clientX: number) {
   const wrap = box.value; if (!wrap || !curves.value.length) return;
   const w = wrap.clientWidth;
   const all = curves.value.flatMap((s) => s.pts);
   const xs = all.map((p) => p.x);
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const rx = e.clientX - wrap.getBoundingClientRect().left;
+  const rx = clientX - wrap.getBoundingClientRect().left;
   const xv = x0 + ((rx - PAD.value.l) / (w - PAD.value.l - PAD.value.r)) * (x1 - x0);
 
   // Canvas 沒有 DOM 可以掛事件,最近點得自己找
@@ -145,12 +155,28 @@ function onMove(e: MouseEvent) {
   hover.value = best; draw();
 }
 
+// 觸控:點一下標一個位置,再點一次換位置,點同一處收起來。
+// 不用 touchmove —— 那會跟捲動搶手勢
+function onTap(e: PointerEvent) {
+  if (e.pointerType === 'mouse') return;   // 滑鼠走 mousemove 那條
+  const before = hover.value?.x;
+  pick(e.clientX);
+  if (before != null && hover.value && Math.abs(before - hover.value.x) < 1e-6) {
+    hover.value = null; draw();            // 點同一個地方 = 收起來
+  }
+}
+
 onMounted(() => { draw(); window.addEventListener('resize', draw); });
 watch([curves, H, () => props.playhead], draw);
 </script>
 
 <template>
-  <div ref="box" class="relative w-full" @mousemove="onMove" @mouseleave="hover = null; draw()">
+  <div
+    ref="box" class="relative w-full"
+    @mousemove="pick($event.clientX)"
+    @mouseleave="hover = null; draw()"
+    @pointerup="onTap"
+  >
     <canvas ref="canvas" class="block w-full" />
     <div
       v-if="hover"
@@ -158,5 +184,11 @@ watch([curves, H, () => props.playhead], draw);
     >
       {{ hover.race }}　{{ field === 'p' ? mmss(hover.val) + '/km' : hover.val.toFixed(0) + ' bpm' }}
     </div>
+    <!-- 觸控裝置才提示怎麼收起來。用 hover 媒體查詢判斷,不是判斷螢幕寬度 ——
+         有觸控筆的桌機、有滑鼠的平板都存在 -->
+    <div
+      v-if="hover"
+      class="absolute bottom-1 right-2 text-[10px] text-dim pointer-events-none hidden [@media(hover:none)]:block"
+    >再點一次收起</div>
   </div>
 </template>
