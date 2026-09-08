@@ -14,13 +14,15 @@
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import { curve, mmss, type Race, type XAxis } from '../lib/races';
+import { stateAt } from '../lib/replay';
 
 const props = defineProps<{
   races: Race[];
   axis: XAxis;
   field: 'hr' | 'p';
-  /** 回放的播放頭位置（跟橫軸同一個單位）。null = 沒在回放 */
-  playhead?: number | null;
+  /** 回放到第幾秒。null = 沒在回放。
+   *  每條帶各自算位置 —— 同一秒六場跑到的距離不一樣。 */
+  playTime?: number | null;
   height?: number;
 }>();
 
@@ -114,11 +116,18 @@ function draw() {
     c.fillText(s.name, left - 6, y + bandH.value / 2 + 4);
   });
 
-  // 播放頭
-  if (props.playhead != null) {
-    const hx = px(props.playhead);
-    c.strokeStyle = '#e8eef6'; c.lineWidth = 1.5;
-    c.beginPath(); c.moveTo(hx, PAD.t); c.lineTo(hx, h - PAD.b); c.stroke();
+  // 播放游標:一條帶一個,各自在自己的位置。跑得快的那條會在前面 ——
+  // 六個記號散開的樣子本身就是「誰領先」
+  if (props.playTime != null) {
+    props.races.forEach((race, i) => {
+      const now = stateAt(race.points, props.playTime!);
+      if (!now) return;
+      const last = race.points[race.points.length - 1];
+      const hx = px(props.axis === 'dist' ? now.d : now.t / (last.t || 1));
+      const y = PAD.t + i * (bandH.value + GAP);
+      c.fillStyle = '#e8eef6';
+      c.fillRect(hx - 1, y - 2, 2, bandH.value + 4);
+    });
   }
   if (hover.value) {
     const hx = px(hover.value.x);
@@ -182,7 +191,7 @@ onMounted(() => {
   }
 });
 onBeforeUnmount(() => ro?.disconnect());
-watch([curves, () => props.height, () => props.playhead], draw);
+watch([curves, () => props.height, () => props.playTime], draw);
 </script>
 
 <template>

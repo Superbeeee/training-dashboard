@@ -126,18 +126,6 @@ const longest = computed(() => Math.max(0, ...shown.value.map((r) => r.points.at
 const rp = useReplay(() => longest.value);
 const SPEEDS = [30, 60, 120, 300];
 
-/** 播放頭在圖上的位置。橫軸是什麼單位,它就要換算成什麼單位。 */
-const playhead = computed(() => {
-  if (!rp.t.value && !rp.playing.value) return null;
-  // 兩條軸都沒有單一對應 —— 六場在同一秒跑到的距離不同。
-  // 用「顯示中第一場」的位置當基準,其餘靠圓點各自標示。
-  const lead = shown.value[0];
-  if (!lead) return null;
-  const s = stateAt(lead.points, rp.t.value);
-  if (!s) return null;
-  return axis.value === 'dist' ? s.d : s.t / (lead.points.at(-1)!.t || 1);
-});
-
 /** 六場在當下這一秒的狀態。這份清單同時當圖例、選擇器與即時看板 ——
  *  閒置時顯示成績,播放時換成當下的距離、配速、心率。 */
 const live = computed(() =>
@@ -215,12 +203,12 @@ const clock = (sec: number) =>
       <div>
         <RaceBands
           v-if="mode === 'band'"
-          :races="shown" :axis="axis" :field="field" :playhead="playhead"
+          :races="shown" :axis="axis" :field="field" :play-time="replaying ? rp.t.value : null"
           :height="Math.max(200, shown.length * 44 + 40)"
         />
         <RaceChart
           v-else
-          :races="shown" :axis="axis" :field="field" :color-of="colorOf" :playhead="playhead"
+          :races="shown" :axis="axis" :field="field" :color-of="colorOf" :play-time="replaying ? rp.t.value : null"
         />
       </div>
 
@@ -395,12 +383,12 @@ const clock = (sec: number) =>
         <div class="flex-1 min-h-0">
           <RaceBands
             v-if="mode === 'band'"
-            :races="shown" :axis="axis" :field="field" :playhead="playhead" :height="zoomH"
+            :races="shown" :axis="axis" :field="field" :play-time="replaying ? rp.t.value : null" :height="zoomH"
           />
           <RaceChart
             v-else
             :races="shown" :axis="axis" :field="field"
-            :color-of="colorOf" :playhead="playhead" :height="zoomH"
+            :color-of="colorOf" :play-time="replaying ? rp.t.value : null" :height="zoomH"
           />
         </div>
 

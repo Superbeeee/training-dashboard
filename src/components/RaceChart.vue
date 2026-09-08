@@ -16,6 +16,7 @@
  */
 import { ref, watch, onMounted, computed } from 'vue';
 import { curve, mmss, type Race, type XAxis } from '../lib/races';
+import { stateAt } from '../lib/replay';
 
 const props = defineProps<{
   races: Race[];
@@ -23,8 +24,10 @@ const props = defineProps<{
   field: 'hr' | 'p';
   colorOf: (slug: string) => string;
   height?: number;
-  /** 回放的播放頭位置（跟橫軸同一個單位）。null = 沒在回放 */
-  playhead?: number | null;
+  /** 回放到第幾秒。null = 沒在回放。
+   *  不傳「播放頭的 x 座標」是因為**同一秒六場跑到的距離不一樣** ——
+   *  東京馬在 12.4K 的時候台東才 10.9K,共用一個 x 是錯的。 */
+  playTime?: number | null;
 }>();
 
 const canvas = ref<HTMLCanvasElement | null>(null);
@@ -123,21 +126,27 @@ function draw() {
     c.beginPath(); c.moveTo(hx, PAD.value.t); c.lineTo(hx, h - PAD.value.b); c.stroke();
   }
 
-  // 播放頭：一條線加上每場當下位置的圓點
-  if (props.playhead != null) {
-    const hx = px(props.playhead);
-    c.strokeStyle = '#e8eef6'; c.lineWidth = 1.5;
-    c.beginPath(); c.moveTo(hx, PAD.value.t); c.lineTo(hx, h - PAD.value.b); c.stroke();
+  // 播放游標:每一場各自算自己的位置。同一秒跑到的距離不同,
+  // 所以六個點會散開 —— 誰在前面一眼看得出來
+  if (props.playTime != null) {
+    props.races.forEach((race, i) => {
+      const s = curves.value[i];
+      if (!s) return;
+      const now = stateAt(race.points, props.playTime!);
+      if (!now) return;
+      const last = race.points[race.points.length - 1];
+      const rx = props.axis === 'dist' ? now.d : now.t / (last.t || 1);
+      const hx = px(rx);
 
-    for (const s of curves.value) {
-      // 找出這條線在播放頭左側的最後一個點
-      let cur = null;
-      for (const pt of s.pts) { if (pt.x > props.playhead) break; cur = pt; }
-      if (!cur) continue;
+      // 找這場在該位置的縱座標
+      let cur = s.pts[0];
+      for (const pt of s.pts) { if (pt.x > rx) break; cur = pt; }
+      if (!cur) return;
+
       c.fillStyle = s.color;
-      c.beginPath(); c.arc(hx, py(cur.y), 3.5, 0, Math.PI * 2); c.fill();
-      c.strokeStyle = '#0b1017'; c.lineWidth = 1.2; c.stroke();
-    }
+      c.beginPath(); c.arc(hx, py(cur.y), 4, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = '#0b1017'; c.lineWidth = 1.4; c.stroke();
+    });
   }
 }
 
@@ -174,7 +183,7 @@ function onTap(e: PointerEvent) {
 }
 
 onMounted(() => { draw(); window.addEventListener('resize', draw); });
-watch([curves, H, () => props.playhead], draw);
+watch([curves, H, () => props.playTime], draw);
 </script>
 
 <template>
