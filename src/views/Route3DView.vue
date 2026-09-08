@@ -11,6 +11,26 @@ import {
 } from '../stores/track';
 
 const store = useTrackStore();
+/** OrbitControls 實例。arm()/disarm() 要用它切換 enabled。 */
+let ctrl: OrbitControls | null = null;
+
+/** 有沒有 hover 能力。沒有的就是純觸控裝置 —— 用能力判斷而不是螢幕寬度,
+ *  因為有觸控筆的桌機、有滑鼠的平板都存在。 */
+const touchOnly = ref(
+  typeof matchMedia !== 'undefined' && matchMedia('(hover: none)').matches,
+);
+const armed = ref(false);
+
+/** 進入互動:啟用 OrbitControls。離開就交還捲動。 */
+function arm() {
+  armed.value = true;
+  if (ctrl) ctrl.enabled = true;
+}
+function disarm() {
+  armed.value = false;
+  if (ctrl) ctrl.enabled = false;
+}
+
 const mount = ref<HTMLDivElement | null>(null);
 let cleanup: (() => void) | null = null;
 
@@ -58,6 +78,11 @@ function render() {
   el.appendChild(renderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
+  ctrl = controls;
+  // 觸控裝置預設不吃手勢 —— OrbitControls 會把 canvas 的 touch-action
+  // 設成 none,而這塊在手機上佔掉大半個畫面。手指一放上去頁面就捲不動,
+  // 使用者會以為卡住。改成點一下才進入互動(見 armed)。
+  controls.enabled = !touchOnly.value;
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.maxPolarAngle = Math.PI / 2.05;
@@ -251,17 +276,40 @@ onMounted(async () => {
   if (!store.points) await store.select(store.dataset);
   render();
 });
-onBeforeUnmount(() => cleanup?.());
+onBeforeUnmount(() => {
+  cleanup?.();
+  ctrl = null;          // 切換資料集會重建場景,舊的別留著
+  armed.value = false;
+});
 watch(
   () => [store.points, store.colorMode, store.vertical, store.exaggeration],
   () => render()
 );
+
 </script>
 
 <template>
   <div class="grid gap-3.5 grid-cols-1 lg:grid-cols-[1fr_300px]">
     <div class="card !p-0 overflow-hidden relative">
-      <div ref="mount" class="w-full h-[520px]" />
+      <div ref="mount" class="w-full h-[400px] sm:h-[520px]" />
+
+      <!-- 觸控裝置:蓋一層透明的東西接住手勢,點一下才把控制權交給 3D。
+           沒有它的話,手指放在這塊上就再也捲不動頁面 -->
+      <button
+        v-if="touchOnly && !armed && store.points"
+        type="button"
+        class="absolute inset-0 grid place-items-end justify-center pb-5
+               bg-transparent cursor-pointer"
+        @click="arm"
+      >
+        <span class="pill pill-on text-xs pointer-events-none">點一下開始轉動</span>
+      </button>
+      <button
+        v-if="touchOnly && armed"
+        type="button"
+        class="absolute top-2 right-2 pill text-[11px] z-10"
+        @click="disarm"
+      >完成</button>
       <div v-if="!store.points" class="absolute inset-0 grid place-items-center text-dim text-[13px]">
         {{ store.error ? `載入失敗：${store.error}` : '載入軌跡中…' }}
       </div>
