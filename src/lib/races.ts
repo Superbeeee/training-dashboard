@@ -1,4 +1,3 @@
-import { lttb } from './downsample';
 
 /** 一場比賽的逐秒點。欄位縮寫是為了檔案大小 —— 六場 77,433 點。 */
 export interface RacePoint {
@@ -64,37 +63,42 @@ export const X_AXIS: Record<XAxis, { label: string; hint: string }> = {
   },
 };
 
-const xOf = (p: RacePoint, r: Race, axis: XAxis, last: RacePoint) =>
-  axis === 'dist' ? p.d : p.t / (last.t || 1);
-
-/** 移動平均。
+/** 按距離分箱取平均。
  *
- *  GPS 逐秒配速抖得很兇 —— 同一段路可能在 4:30 和 5:10 之間跳。直接畫出來
- *  是一片鋸齒,六條疊在一起就糊成一團,看不出趨勢。
+ *  原本是「先移動平均、再 LTTB 降採樣」,但那樣沒用 —— **LTTB 專挑
+ *  偏離直線最遠的點,也就是平滑之後剩下的每一個峰和谷**。實測台東 CT
+ *  在 300px 寬的圖上,60 秒平滑後仍有 292 次方向反轉(約每 3px 一次),
+ *  而且窗口加大到 180 秒反而變成 301 次。平滑掉的東西被 LTTB 挑了回來。
  *
- *  **這不是點太多造成的**,降採樣解決不了:LTTB 挑的是「偏離直線最遠的點」,
- *  而鋸齒的尖端正好符合那個條件,壓完只會保留最極端的雜訊。要先平滑再取樣。 */
-function smooth(pts: RacePoint[], field: 'hr' | 'p', seconds: number): (number | null)[] {
-  // 窗口用**時間**不用點數。預覽檔已經 LTTB 壓過,點跟點之間平均隔 13.5 秒
-  // 而且不等距 —— 拿點數當窗口的話,18 個點就是 4 分鐘,會把 35K 那種
-  // 一兩分鐘內發生的崩盤一起抹平。
-  const half = seconds / 2;
-  let lo = 0, hi = 0, sum = 0, n = 0;
-  return pts.map((p) => {
-    while (hi < pts.length && pts[hi].t <= p.t + half) {
-      if (pts[hi][field] != null) { sum += pts[hi][field]!; n++; }
-      hi++;
-    }
-    while (pts[lo].t < p.t - half) {
-      if (pts[lo][field] != null) { sum -= pts[lo][field]!; n--; }
-      lo++;
-    }
-    return n ? sum / n : null;
-  });
+ *  分箱沒有這個問題:固定間隔、區間內取平均、不再挑點。每 1K 一箱的話
+ *  一場全馬 42 個點,反轉降到 31 次,線就讀得出趨勢了。
+ *
+ *  代價是看不到單點的極端值 —— 但那本來就不是這張圖要回答的問題,
+ *  要看逐秒細節有回放。 */
+function bin(
+  pts: RacePoint[],
+  field: 'hr' | 'p',
+  meters: number,
+): { d: number; t: number; v: number }[] {
+  const buckets = new Map<number, { s: number; n: number; t: number }>();
+  for (const p of pts) {
+    const v = p[field];
+    if (v == null) continue;
+    const k = Math.floor(p.d / meters);
+    const b = buckets.get(k);
+    if (b) { b.s += v; b.n++; }
+    else buckets.set(k, { s: v, n: 1, t: p.t });
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([k, b]) => ({ d: k * meters, t: b.t, v: b.s / b.n }));
 }
 
-/** 取一場的曲線，降採樣到 width 個點左右。
- *  螢幕寬度就那麼多像素，畫一萬兩千個點只是在燒 DOM。 */
+/** 取一場的曲線。
+ *
+ *  箱寬跟著畫布寬度走:窄螢幕用大箱(點少、線乾淨),桌機用小箱(看得到
+ *  更多起伏)。不論哪個,點數都遠少於像素寬度 —— 這張圖要回答的是
+ *  「趨勢長什麼樣」,不是「第 8,432 秒發生什麼事」。 */
 export function curve(
   race: Race,
   axis: XAxis,
@@ -102,26 +106,15 @@ export function curve(
   width = 800,
 ): { x: number; y: number }[] {
   const last = race.points[race.points.length - 1];
-  const raw = race.points.filter((p) => p[field] != null);
-
-  // 先平滑再降採樣。配速抖得比心率兇,窗口開大一點,但都以秒為單位。
-  const sm = smooth(raw, field, field === 'p' ? 60 : 30);
-  const pts = raw.map((p, i) => ({ ...p, [field]: sm[i] })) as typeof raw;
-
-  const sampled = lttb(pts, width, (p) => xOf(p, race, axis, last), (p) => p[field] as number);
-  return sampled.map((p) => ({ x: xOf(p, race, axis, last), y: p[field] as number }));
+  // 窄螢幕用大箱(點少、線乾淨),桌機用小箱(看得到更多起伏)。
+  // 兩者的點數都遠少於像素寬度 —— 這張圖要回答的是「趨勢長什麼樣」。
+  const meters = width < 480 ? 1000 : 250;
+  return bin(race.points, field, meters).map((b) => ({
+    x: axis === 'dist' ? b.d : b.t / (last.t || 1),
+    y: b.v,
+  }));
 }
 
-/** 讀一場比賽。
- *
- *  預設拿預覽檔(`.min.json`,每場 42 KB,已預先壓到 900 點)。六場合計
- *  262 KB,而完整檔是 3.5 MB —— 差 13 倍,而畫面上根本畫不到那麼多點。
- *
- *  900 這個數字是刻意訂的:圖上最多只畫到畫布寬度的八成(桌機約 640、
- *  手機約 272),所以 900 點對任何螢幕都夠用,前端再跑一次 LTTB 就得到
- *  正確的點數。**預先壓過不會讓畫面變糊**,因為它還是比要畫的點多。
- *
- *  full=true 才抓完整逐秒檔 —— 目前只有需要看單場細節時才用得上。 */
 export async function loadRace(slug: string, full = false): Promise<Race> {
   const url = `/races/${slug}${full ? '' : '.min'}.json`;
   const res = await fetch(url);

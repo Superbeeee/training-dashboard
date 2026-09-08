@@ -1,13 +1,35 @@
 <script setup lang="ts">
 /** 六場全馬疊圖。橫軸怎麼選是這頁的重點 —— 見 X_AXIS 的三段說明。 */
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import RaceChart from '../components/RaceChart.vue';
+import RaceBands from '../components/RaceBands.vue';
 import { useReplay, stateAt, windowAt } from '../lib/replay';
 import { RACES, X_AXIS, loadRace, mmss, type Race, type XAxis } from '../lib/races';
+
+/** 這張卡片的實際寬度。**不用 window.innerWidth** —— 儀表板可能被放進
+ *  窄欄位裡,那時視窗很寬但容器很窄。圖表的降採樣、清單的欄位隱藏
+ *  都是看容器,這裡要跟它們同一個判準。 */
+const card = ref<HTMLElement | null>(null);
+const cardW = ref(800);
+let ro: ResizeObserver | null = null;
 
 const loaded = ref<Race[]>([]);
 const error = ref<string | null>(null);
 const axis = ref<XAxis>('dist');
+/** 色帶或折線。
+ *
+ *  **窄螢幕預設色帶**:六條線疊在 300px 寬的畫面裡本來就分不開,不管
+ *  怎麼平滑、怎麼降採樣都一樣 —— 線與線交錯的地方就是讀不出來。色帶
+ *  一場一條、互不遮蔽,而且色階的跳變比線的轉折更容易被眼睛抓到。
+ *
+ *  桌機空間夠,折線讀得出精確數值,所以維持折線。兩邊都留切換鈕,
+ *  預設只是「大部分情況下比較好用的那個」。 */
+const mode = ref<'band' | 'line'>('line');
+let modeAuto = true;
+function setMode(m: 'band' | 'line') {
+  mode.value = m;
+  modeAuto = false;          // 使用者選過就不再自動切
+}
 const field = ref<'p' | 'hr'>('p');
 const off = ref<Set<string>>(new Set());
 
@@ -37,12 +59,63 @@ onMounted(async () => {
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   }
-  // 手機上預設只開三場。六條線疊在 300px 寬的圖裡本來就分不開 ——
-  // 與其給一團看不懂的東西再叫使用者自己關,不如先給看得懂的,
-  // 想比全部再自己開。桌機空間夠,維持六條全開。
-  if (window.innerWidth < 480) {
-    off.value = new Set(['xinyi24', 'testrace', 'fukuoka']);
+
+  // 卡片在 v-else 裡,資料載完才存在 —— 要等 DOM 更新完才量得到
+  await nextTick();
+  if (card.value) {
+    cardW.value = card.value.clientWidth;
+    // 同樣只認寬度 —— 切換色帶/折線會改變卡片高度,不該回頭觸發自己
+    ro = new ResizeObserver(([e]) => {
+      const w = Math.round(e.contentRect.width);
+      if (w !== cardW.value) cardW.value = w;
+    });
+    ro.observe(card.value);
   }
+});
+
+// 窄容器預設只開三場(最快/中間/最慢)。六條線疊在 300px 寬的圖裡本來就
+// 分不開 —— 與其給一團看不懂的東西再叫使用者自己關,不如先給看得懂的。
+// 只在第一次變窄時套用,之後尊重使用者自己的選擇。
+/** 放大檢視。手機直立時六條線擠在 300px 裡本來就讀不了 ——
+ *  與其把線一直磨平,不如借用另一個方向的空間。 */
+const zoomed = ref(false);
+/** 直立時要把內容轉 90 度。不能用 screen.orientation.lock() ——
+ *  iOS Safari 不支援,而且那需要先進入 fullscreen。CSS 轉向到處都能用,
+ *  使用者真的把手機轉過來時再取消(見 portrait)。 */
+const portrait = ref(false);
+let mq: MediaQueryList | null = null;
+
+function openZoom() {
+  zoomed.value = true;
+  document.body.style.overflow = 'hidden';   // 蓋住時別讓底下捲
+}
+function closeZoom() {
+  zoomed.value = false;
+  document.body.style.overflow = '';
+}
+
+/** 放大後圖的高度。直立轉 90 度的話,可用高度是螢幕的寬度。 */
+const zoomH = computed(() => {
+  // 直立轉 90 度的話,可用高度是螢幕的「寬度」
+  const h = portrait.value ? window.innerWidth : window.innerHeight;
+  // 扣掉上方控制列(約 34)、下方圖例(約 40)、內距與間隙(約 46)
+  return Math.max(180, h - 120);
+});
+
+watch(cardW, (w) => {
+  if (!w || !modeAuto) return;
+  mode.value = w < 480 ? 'band' : 'line';
+});
+
+onMounted(() => {
+  mq = matchMedia('(orientation: portrait)');
+  portrait.value = mq.matches;
+  mq.addEventListener('change', (e) => (portrait.value = e.matches));
+});
+
+onBeforeUnmount(() => {
+  ro?.disconnect();
+  document.body.style.overflow = '';
 });
 
 const total = computed(() => loaded.value.reduce((n, r) => n + r.points.length, 0));
@@ -78,6 +151,14 @@ const live = computed(() =>
   }),
 );
 
+/** 當下心率最高的那一場。標它而不是用絕對門檻 —— 門檻要嘛憑感覺訂,
+ *  要嘛得先確定最大心率,而回放要看的本來就是「此刻誰最吃力」。 */
+const topHr = computed(() => {
+  const withHr = live.value.filter((l) => l.on && l.hr != null);
+  if (withHr.length < 2) return null;      // 只有一場就沒有比較的意義
+  return withHr.reduce((a, b) => (b.hr! > a.hr! ? b : a)).slug;
+});
+
 /** 播放中依當下距離排名;沒播放就照氣溫排(跟顏色一致) */
 const ranked = computed(() => {
   if (!replaying.value) return live.value;
@@ -94,7 +175,7 @@ const clock = (sec: number) =>
   <div v-else-if="!loaded.length" class="sub py-6">讀取中⋯</div>
 
   <template v-else>
-    <div class="card">
+    <div ref="card" class="card">
       <div class="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <h2 class="card-h !mb-0">六場全馬疊圖</h2>
         <div class="flex gap-4 flex-wrap items-center">
@@ -105,6 +186,19 @@ const clock = (sec: number) =>
               class="pill" :class="{ 'pill-on': field === f.k }"
               @click="field = f.k as 'p' | 'hr'"
             >{{ f.l }}</button>
+          </span>
+          <button
+            v-if="cardW < 480"
+            type="button" class="pill !px-2 text-[11px]"
+            @click="openZoom"
+          >放大</button>
+          <span class="flex items-center gap-1.5">
+            <span class="text-[11px] text-dim">呈現</span>
+            <button
+              v-for="m in [{ k: 'band', l: '色帶' }, { k: 'line', l: '折線' }]" :key="m.k"
+              class="pill" :class="{ 'pill-on': mode === m.k }"
+              @click="setMode(m.k as 'band' | 'line')"
+            >{{ m.l }}</button>
           </span>
           <span class="flex items-center gap-1.5">
             <span class="text-[11px] text-dim">橫軸</span>
@@ -118,7 +212,17 @@ const clock = (sec: number) =>
         </div>
       </div>
 
-      <RaceChart :races="shown" :axis="axis" :field="field" :color-of="colorOf" :playhead="playhead" />
+      <div>
+        <RaceBands
+          v-if="mode === 'band'"
+          :races="shown" :axis="axis" :field="field" :playhead="playhead"
+          :height="Math.max(200, shown.length * 44 + 40)"
+        />
+        <RaceChart
+          v-else
+          :races="shown" :axis="axis" :field="field" :color-of="colorOf" :playhead="playhead"
+        />
+      </div>
 
       <!-- 回放。資料早就在瀏覽器裡了,這裡只是按時間軸重讀一遍 -->
       <div class="flex items-center gap-2.5 mt-3 flex-wrap">
@@ -158,17 +262,21 @@ const clock = (sec: number) =>
           @click="toggle(l.slug)"
         >
           <span v-if="replaying && l.on" class="w-4 text-dim text-[11px]">{{ i + 1 }}</span>
+          <!-- 色帶模式下顏色代表配速,不代表哪一場 —— 這裡就不能再用賽事色,
+               否則同一個顏色在圖上與清單裡是兩個意思 -->
           <span
             class="w-2.5 h-2.5 rounded-sm shrink-0"
-            :style="{ background: l.on ? l.color : 'transparent',
-                      boxShadow: l.on ? 'none' : `inset 0 0 0 1.5px ${l.color}` }"
+            :style="{ background: !l.on ? 'transparent'
+                        : mode === 'band' ? '#8b98a8' : l.color,
+                      boxShadow: l.on ? 'none'
+                        : `inset 0 0 0 1.5px ${mode === 'band' ? '#8b98a8' : l.color}` }"
           />
           <span class="flex-1 min-w-0 truncate">{{ l.name }}</span>
 
           <template v-if="replaying && l.on">
             <span class="w-14 text-right">{{ l.dist != null ? (l.dist / 1000).toFixed(2) + 'k' : '—' }}</span>
             <span class="w-16 text-right">{{ l.pace ? mmss(l.pace) : '—' }}</span>
-            <span class="w-12 text-right hidden @sm:inline" :class="l.hr && l.hr >= 175 ? 'text-warn' : ''">
+            <span class="w-12 text-right hidden @sm:inline" :class="l.slug === topHr ? 'text-warn' : ''">
               {{ l.hr ? l.hr.toFixed(0) : '—' }}
             </span>
             <span class="w-8 text-right text-[11px] text-accent hidden @sm:inline">{{ l.done ? '完賽' : '' }}</span>
@@ -187,7 +295,7 @@ const clock = (sec: number) =>
           <!-- 窄容器藏掉了後面幾欄,說明文字要跟著變,不然會標到看不見的欄位 -->
           <span class="@sm:hidden">{{ replaying ? '距離 · 配速（30 秒平均）' : '完賽時間' }}</span>
           <span class="hidden @sm:inline">
-            {{ replaying ? '距離 · 配速 · 心率（30 秒平均）' : '完賽 · 配速 · 氣溫' }}
+            {{ replaying ? '距離 · 配速 · 心率（30 秒平均，標黃的是此刻最高）' : '完賽 · 配速 · 氣溫' }}
           </span>
           <button v-if="!allOn" class="pill !px-2 !py-0.5 text-[11px]" @click="off = new Set()">
             全部顯示
@@ -251,4 +359,67 @@ const clock = (sec: number) =>
       </div>
     </div>
   </template>
+
+  <!-- 放大檢視:借用另一個方向的空間。
+       直立時把整層轉 90 度 —— 手機高度變成圖的寬度,300px 變成 800px。
+       使用者自己把手機轉橫的話就不用轉了(portrait 會變 false)。 -->
+  <Teleport to="body">
+    <div
+      v-if="zoomed"
+      class="fixed inset-0 z-50 bg-ink"
+      :style="portrait
+        ? { width: '100vh', height: '100vw',
+            transform: 'rotate(90deg) translateY(-100%)', transformOrigin: 'top left' }
+        : {}"
+    >
+      <div class="h-full flex flex-col p-3 gap-2">
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="text-[13px] font-bold">六場全馬</span>
+          <span class="flex gap-1">
+            <button
+              v-for="f in [{ k: 'p', l: '配速' }, { k: 'hr', l: '心率' }]" :key="f.k"
+              class="pill !px-2 text-[11px]" :class="{ 'pill-on': field === f.k }"
+              @click="field = f.k as 'p' | 'hr'"
+            >{{ f.l }}</button>
+          </span>
+          <span class="flex gap-1">
+            <button
+              v-for="(v, k) in X_AXIS" :key="k"
+              class="pill !px-2 text-[11px]" :class="{ 'pill-on': axis === k }"
+              @click="axis = k as XAxis"
+            >{{ v.label }}</button>
+          </span>
+          <button class="pill !px-2 text-[11px] ml-auto" @click="closeZoom">關閉</button>
+        </div>
+
+        <div class="flex-1 min-h-0">
+          <RaceBands
+            v-if="mode === 'band'"
+            :races="shown" :axis="axis" :field="field" :playhead="playhead" :height="zoomH"
+          />
+          <RaceChart
+            v-else
+            :races="shown" :axis="axis" :field="field"
+            :color-of="colorOf" :playhead="playhead" :height="zoomH"
+          />
+        </div>
+
+        <div class="flex gap-2.5 flex-wrap shrink-0 text-[11px]">
+          <button
+            v-for="r in RACES" :key="r.slug" type="button"
+            class="flex items-center gap-1 cursor-pointer"
+            :class="off.has(r.slug) ? 'opacity-35' : ''"
+            @click="toggle(r.slug)"
+          >
+            <span class="w-2 h-2 rounded-sm"
+                  :style="{ background: off.has(r.slug) ? 'transparent'
+                              : mode === 'band' ? '#8b98a8' : colorOf(r.slug),
+                            boxShadow: off.has(r.slug)
+                              ? `inset 0 0 0 1.5px ${mode === 'band' ? '#8b98a8' : colorOf(r.slug)}` : 'none' }" />
+            {{ r.name }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>

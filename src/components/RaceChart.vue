@@ -75,21 +75,23 @@ function draw() {
   const xs = all.map((p) => p.x);
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
 
-  // Y 軸取百分位不取 min/max。一場全馬裡總有幾秒是停下來的 —— 等紅燈、
-  // 補給、綁鞋帶 —— 那幾秒的配速會算出 70 分/km,用 max 的話整條軸會被
-  // 那一個點撐開。
+  // Y 軸用完整範圍,不裁百分位。
   //
-  // 但 98 百分位還是太寬:六場實測 1~98% 跨 4.4~9.2 分/km,而中間 50%
-  // 的資料只佔 4.7~5.3 —— **一半以上的資料被壓在上緣 16% 的高度裡**,
-  // 六條線當然分不開。收到 92%,把畫面讓給真正在跑的那一段。
+  // 窄螢幕例外:手機上六條線本來就會疊在一起,一個 70 分/km 的停等點
+  // 會把整條軸撐開、其他全壓成上緣一條線。所以窄螢幕收到 2~92%,
+  // 桌機空間夠就照實畫。
   const sorted = all.map((p) => p.y).sort((a, b) => a - b);
   const q = (f: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * f))];
-  const y0 = q(0.02), y1 = q(0.92);
+  const narrow = w < 480;
+  const y0 = narrow ? q(0.02) : sorted[0];
+  const y1 = narrow ? q(0.92) : sorted[sorted.length - 1];
   const px = (x: number) => PAD.value.l + ((x - x0) / (x1 - x0 || 1)) * (w - PAD.value.l - PAD.value.r);
   // 配速的 y 軸要反過來 —— 秒數小 = 跑得快 = 該在上面
+  // 不夾。夾住的話超出範圍的點會全部貼在邊緣,連成一條假的水平線,
+  // 看起來像資料撞到天花板 —— 而實際上它只是跑出畫面。
+  // 改用 clip 讓線自然畫出去,看得出來它是「離開」不是「停在那裡」。
   const py = (y: number) => {
-    // 夾在 0~1 —— 超出百分位範圍的點畫在邊緣,而不是飛出畫布外
-    const n = Math.max(0, Math.min(1, (y - y0) / (y1 - y0 || 1)));
+    const n = (y - y0) / (y1 - y0 || 1);
     return PAD.value.t + (props.field === 'p' ? n : 1 - n) * (h - PAD.value.t - PAD.value.b);
   };
 
@@ -104,11 +106,16 @@ function draw() {
   // 窄螢幕線細一點,六條疊在一起才不會糊成一片
   c.lineWidth = w < 480 ? 1.1 : 1.6;
   c.lineJoin = 'round';
+  c.save();
+  c.beginPath();
+  c.rect(PAD.value.l, PAD.value.t, w - PAD.value.l - PAD.value.r, h - PAD.value.t - PAD.value.b);
+  c.clip();
   for (const s of curves.value) {
     c.strokeStyle = s.color; c.beginPath();
     s.pts.forEach((p, i) => (i ? c.lineTo(px(p.x), py(p.y)) : c.moveTo(px(p.x), py(p.y))));
     c.stroke();
   }
+  c.restore();
 
   if (hover.value) {
     const hx = px(hover.value.x);

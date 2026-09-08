@@ -16,7 +16,7 @@ interface DatasetMeta {
 export const DATASETS: Record<Dataset, DatasetMeta> = {
   tokyo: {
     label: '東京馬 3/01',
-    desc: '2026 東京馬拉松，42.65 km / 3:22:07，12,128 筆逐秒 record。35K 後配速從 4:33 掉到 5:57，心率反而從 175 降到 161 —— 撞牆的教科書形狀。',
+    desc: '2026 東京馬拉松，42.65 km / 3:22:07，12,128 筆逐秒 record。35K 後配速從 4:51 掉到 5:57，心率反而從 175 降到 161 —— 撞牆的教科書形狀。',
     url: '/tracks/20260301-tokyo.json',
     vertical: 'ele',
     // 這場高度誤差實測中位數 4.6m（同一地點兩次經過），倍率開太大會放大成假高低差
