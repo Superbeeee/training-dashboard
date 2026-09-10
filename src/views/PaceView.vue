@@ -115,7 +115,10 @@ watch([src, hh, mm, ss], () => {
         </thead>
         <tbody>
           <tr v-for="d in equiv" :key="d.m" class="border-b border-[#1d2632] last:border-0">
-            <td class="py-2 px-2.5">{{ d.label }}</td>
+            <td class="py-2 px-2.5">
+              {{ d.label }}
+              <span class="text-dim text-[11px] ml-1">{{ d.note }}</span>
+            </td>
             <td class="py-2 px-2.5">{{ hms(d.vdot) }}</td>
             <td class="py-2 px-2.5">{{ hms(d.riegel) }}</td>
             <td class="py-2 px-2.5" :class="Math.abs(d.vdot - d.riegel) > 60 ? 'text-warn' : 'text-dim'">
@@ -129,6 +132,10 @@ watch([src, hh, mm, ss], () => {
         VDOT（Daniels-Gilbert 1979）走生理模型，Riegel（1977）是一條冪次律。
         實測十二組換算，最大只差 43 秒（5K 推全馬），相鄰距離之間都在 15 秒內 ——
         差超過一分鐘的會標黃，但那不太會發生。
+        <br>
+        <b>目標距離是標準賽事距離。</b>帶入實績時來源用的是該場 GPS 實測值，
+        所以「全馬 42.195K」那一列會跟你輸入的成績不一樣 —— 少跑 455 公尺，
+        自然快一點。
       </div>
     </div>
 

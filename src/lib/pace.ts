@@ -46,11 +46,16 @@ export function timeFromVdot(v: number, d: number): number {
   return (lo + hi) / 2;
 }
 
+/** 目標距離用**標準賽事距離**,不是 GPS 實測值。
+ *
+ *  這件事要標出來:按「帶入實績」的時候來源是那場的 GPS 距離
+ *  (東京馬 42,650 公尺),而「全馬」這一列算的是標準的 42,195 —— 少 455
+ *  公尺,所以會比輸入的成績快兩分鐘。不寫距離的話那個數字看起來像算錯。 */
 export const DISTANCES = [
-  { label: '5K', m: 5000 },
-  { label: '10K', m: 10000 },
-  { label: '半馬', m: 21097.5 },
-  { label: '全馬', m: 42195 },
+  { label: '5K', m: 5000, note: '5.0K' },
+  { label: '10K', m: 10000, note: '10.0K' },
+  { label: '半馬', m: 21097.5, note: '21.0975K' },
+  { label: '全馬', m: 42195, note: '42.195K' },
 ] as const;
 
 /** Daniels 的訓練強度區間,各為 VDOT 的固定百分比。 */
