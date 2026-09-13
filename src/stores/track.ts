@@ -3,7 +3,9 @@ import { buildTrack, loadTrack, type TrackPoint } from '../lib/track';
 
 export type Dataset = 'tokyo' | 'interval' | 'synthetic';
 export type ColorMode = 'pace' | 'hr' | 'ele';
-export type VerticalMode = 'ele' | 'time';
+// ele：海拔（地形）；time：起跑後秒數（把重疊的圈展開成螺旋，但螺距會混到配速）；
+// dist：累積距離（每圈等高，螺距固定，配速全交給顏色）
+export type VerticalMode = 'ele' | 'time' | 'dist';
 
 interface DatasetMeta {
   label: string;
@@ -24,9 +26,11 @@ export const DATASETS: Record<Dataset, DatasetMeta> = {
   },
   interval: {
     label: '間歇 8/13',
-    desc: '1600m×3 (r180s)，松山區田徑場，5.22 km / 28 分鐘。田徑場繞圈軌跡會重疊，預設用時間軸展開成螺旋。',
+    desc: '1600m×3 (r180s)，松山區田徑場，5.22 km / 28 分鐘。田徑場繞圈軌跡會重疊，預設用距離軸展開成螺旋：每圈等高，配速交給顏色。',
     url: '/tracks/20260813-interval.json',
-    vertical: 'time',
+    // 不用時間軸：快的圈佔的時間少、慢的佔得多，螺距會同時混到配速與時間佔比，
+    // 跟顏色講的配速打架。距離軸每 400 m 一圈等高，形狀只剩圈數，配速全交給顏色。
+    vertical: 'dist',
     exaggeration: 14,
   },
   synthetic: {

@@ -2,10 +2,10 @@
 import { ref, defineAsyncComponent } from 'vue';
 import OverviewView from './views/OverviewView.vue';
 
-// 總覽是進站第一眼,同步載入。其餘三個分頁動態載入 ——
-// 3D 路線那頁光是 three.js 就佔掉整包的一半以上,而多數人不會點進去;
-// 六場全馬那頁還要再抓 3.5 MB 的逐秒資料。
+// 總覽是進站第一眼,同步載入。其餘分頁動態載入 ——
+// 3D 路線那頁光是 three.js 就佔掉整包的一半以上,而多數人不會點進去。
 // 打開總覽卻先下載整個 3D 引擎,是沒有道理的。
+// (六場全馬那頁載的是降採樣後的 .min.json,六場合計約 260 KB,不是瓶頸。)
 const RacesView = defineAsyncComponent(() => import('./views/RacesView.vue'));
 const Route3DView = defineAsyncComponent(() => import('./views/Route3DView.vue'));
 const ScaleView = defineAsyncComponent(() => import('./views/ScaleView.vue'));

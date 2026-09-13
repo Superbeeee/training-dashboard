@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:public": "npm run build && rm -f dist/sessions.json dist/weights.json dist/load.json && find dist/races -name '*.json' -not -name '*.min.json' -delete",
+    "deploy": "npm run build:public && wrangler deploy"
   },
   "dependencies": {
     "@types/three": "^0.185.4",
@@ -23,6 +25,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
-    "vue-tsc": "^3.3.10"
+    "vue-tsc": "^3.3.10",
+    "wrangler": "^4.86.0"
   }
 }

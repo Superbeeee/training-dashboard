@@ -22,6 +22,10 @@ const load = ref<DayLoad[]>([]);
 const loadWindow = computed(() => load.value.slice(-90));
 const last = computed(() => loadWindow.value[loadWindow.value.length - 1] ?? null);
 const loadError = ref<string | null>(null);
+// 三份訓練資料都不在（HTTP 404）＝ 這是公開版。
+// sessions / weights / load 是個人資料,不進版控也不上線,只有本機有。
+// 其他錯誤（格式壞掉、伺服器掛了）仍走 loadError 那條路顯示原文。
+const privateOnly = ref(false);
 
 // 0 是本週，-1 是上週。往未來翻沒有意義，所以上限是 0
 const weekOffset = ref(0);
@@ -57,13 +61,21 @@ onMounted(async () => {
     [sessions.value, weighings.value, load.value] =
       await Promise.all([loadSessions(), loadWeighings(), loadLoad()]);
   } catch (e) {
-    loadError.value = e instanceof Error ? e.message : String(e);
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/HTTP 404$/.test(msg)) privateOnly.value = true;
+    else loadError.value = msg;
   }
 });
 </script>
 
 <template>
   <div class="grid gap-3.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+    <div v-if="privateOnly" class="note sm:col-span-2 lg:col-span-4">
+      <strong>這一頁只有本機看得到。</strong>
+      訓練紀錄、體重、負荷曲線是個人資料,不進公開版;
+      給教練看的是每週另外產出的單檔週報。
+      其他分頁（六場全馬、配速計算、3D 路線）照常可用。
+    </div>
     <div class="card">
       <h2 class="card-h">臺北馬倒數</h2>
       <div class="stat">{{ daysToRace }}<span class="stat-u">天</span></div>
@@ -71,13 +83,20 @@ onMounted(async () => {
     </div>
     <div class="card">
       <h2 class="card-h">本週跑量</h2>
-      <div class="stat">
-        {{ weeklyVolume.actualKm }}<span class="stat-u">/ {{ weeklyVolume.targetKm }} km</span>
-      </div>
-      <div class="sub">
-        還差 {{ (weeklyVolume.targetKm - weeklyVolume.actualKm).toFixed(1) }} km
-        <span class="text-warn">· 示意</span>
-      </div>
+      <!-- 公開版沒有訓練紀錄,連示意數字都不放,免得被當真 -->
+      <template v-if="privateOnly">
+        <div class="stat text-dim">—</div>
+        <div class="sub">僅本機</div>
+      </template>
+      <template v-else>
+        <div class="stat">
+          {{ weeklyVolume.actualKm }}<span class="stat-u">/ {{ weeklyVolume.targetKm }} km</span>
+        </div>
+        <div class="sub">
+          還差 {{ (weeklyVolume.targetKm - weeklyVolume.actualKm).toFixed(1) }} km
+          <span class="text-warn">· 示意</span>
+        </div>
+      </template>
     </div>
     <div class="card">
       <h2 class="card-h">體重</h2>
@@ -105,7 +124,9 @@ onMounted(async () => {
       <h2 class="card-h">
         訓練負荷 ATL / CTL / TSB（近 90 天）
       </h2>
+      <div v-if="privateOnly" class="sub py-6">負荷資料僅本機。</div>
       <LineChart
+        v-else
         :series="[
           { values: loadWindow.map((d) => d.atl), color: '#ff6b8b' },
           { values: loadWindow.map((d) => d.ctl), color: '#23d3a0' },

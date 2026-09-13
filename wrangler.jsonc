@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "training-dashboard",
+  "compatibility_date": "2026-05-03",
+  // 純靜態站,沒有 worker 程式碼。上傳的是 dist/,
+  // 但要先跑 npm run build:public 把個人資料檔清掉再 deploy(見 package.json)。
+  "assets": {
+    "directory": "dist"
+  },
+  "routes": [
+    { "pattern": "training.superbeeee.com", "custom_domain": true }
+  ]
+}

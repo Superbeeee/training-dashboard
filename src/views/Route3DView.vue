@@ -58,6 +58,7 @@ function project(pts: TrackPoint[]) {
     z: -(p.lat - lat0) * 110540,
     ele: p.ele,
     t: p.t,
+    dist: p.dist,
   }));
 }
 
@@ -91,12 +92,16 @@ function render() {
   const xs = proj.map((p) => p.x), zs = proj.map((p) => p.z);
   const extent = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs));
   const maxT = Math.max(...proj.map((p) => p.t)) || 1;
+  const maxD = Math.max(...proj.map((p) => p.dist)) || 1;
   const ex = store.exaggeration;
   const vert = store.vertical;
 
-  // 垂直座標：海拔（誇張倍率）或時間（把重疊的圈數展開成螺旋）
-  const yOf = (p: { ele: number; t: number }) =>
-    vert === 'ele' ? p.ele * ex : (p.t / maxT) * extent * (ex / 18);
+  // 垂直座標：海拔（誇張倍率）、時間或距離（把重疊的圈數展開成螺旋）。
+  // 時間軸的螺距會混到配速；距離軸每圈等高，配速只由顏色表達。
+  const yOf = (p: { ele: number; t: number; dist: number }) =>
+    vert === 'ele' ? p.ele * ex
+      : vert === 'time' ? (p.t / maxT) * extent * (ex / 18)
+      : (p.dist / maxD) * extent * (ex / 18);
 
   const grid = new THREE.GridHelper(Math.max(extent * 2.2, 200), 30, 0x1e2a38, 0x161f2b);
   grid.position.y = Math.min(...proj.map(yOf)) - extent * 0.03;
@@ -153,7 +158,7 @@ function render() {
   // 起點／終點：懸在上方的倒立圓錐指標
   const markR = Math.max(extent * 0.014, 1.5);
   const markers: THREE.Object3D[] = [];
-  const addMarker = (p: { x: number; z: number; ele: number; t: number }, color: number) => {
+  const addMarker = (p: { x: number; z: number; ele: number; t: number; dist: number }, color: number) => {
     const g = new THREE.Group();
     const y = yOf(p), lift = markR * 5.5;
     const cone = new THREE.Mesh(
@@ -339,11 +344,11 @@ watch(
         <h2 class="card-h">垂直軸</h2>
         <div class="flex gap-1.5 mb-2">
           <button
-            v-for="v in (['ele', 'time'] as VerticalMode[])" :key="v"
+            v-for="v in (['ele', 'time', 'dist'] as VerticalMode[])" :key="v"
             class="pill flex-1 !px-0 text-center text-xs"
             :class="{ 'pill-on': store.vertical === v }"
             @click="store.vertical = v"
-          >{{ v === 'ele' ? '海拔' : '時間' }}</button>
+          >{{ { ele: '海拔', time: '時間', dist: '距離' }[v] }}</button>
         </div>
         <input
           v-model.number="store.exaggeration" type="range" min="1" max="40"
@@ -352,7 +357,9 @@ watch(
         <div class="sub">
           {{ store.vertical === 'ele'
             ? `海拔誇張倍率 ×${store.exaggeration}。真實高低差只有十幾公尺，不誇張化看不出起伏。`
-            : `時間軸尺度 ×${store.exaggeration}。田徑場繞圈軌跡會完全重疊，改用時間當高度把圈數展開成螺旋。` }}
+            : store.vertical === 'time'
+              ? `時間軸尺度 ×${store.exaggeration}。圈數展開成螺旋，但快的圈螺距密、慢的圈鬆，跟顏色講的配速重疊。`
+              : `距離軸尺度 ×${store.exaggeration}。每 400 m 一圈等高，螺距固定，配速只看顏色。` }}
         </div>
       </div>
 
